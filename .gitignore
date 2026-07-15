@@ -51,3 +51,11 @@ pip-wheel-metadata/
 # Jupyter and macOS metadata
 .ipynb_checkpoints/
 .DS_Store
+
+# SenseOrder web workspace
+web/node_modules/
+web/.next/
+web/data/*.db
+web/data/*.db-*
+web/public/uploads/*
+!web/public/uploads/.gitkeep
