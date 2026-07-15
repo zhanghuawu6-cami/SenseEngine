@@ -1,3 +1,4 @@
+@import "./styles/tokens.css";
 @import "tailwindcss";
 
 @theme {
@@ -7,9 +8,9 @@
   --color-still-50: #f0f3f1;
   --color-still-100: #e4e9e6;
   --color-still-300: #b7c1bc;
-  --color-bio-400: #b8ff6d;
+  --color-bio-400: var(--color-bio);
   --color-bio-500: #9ee954;
-  --color-amber-soft: #e7b66b;
+  --color-amber-soft: var(--color-action);
   --ease-sense: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -1399,17 +1400,17 @@ canvas {
   --navy-800: #10252d;
   --navy-700: #1b343b;
   --cyan-500: #9ee954;
-  --cyan-400: #b8ff6d;
+  --cyan-400: var(--color-bio);
   --cyan-100: #e3f3d7;
   --cyan-50: #e4e9e6;
-  --amber-500: #e7b66b;
+  --amber-500: var(--color-action);
   --amber-100: #eee3d1;
   --ink: #172823;
   --muted: #596762;
   --line: rgba(28, 48, 43, 0.16);
   --line-dark: rgba(224, 235, 229, 0.13);
   --paper: #e4e9e6;
-  --shell: 1280px;
+  --shell: var(--shell-max);
   --header-h: 64px;
   --ease-sense: cubic-bezier(0.22, 1, 0.36, 1);
 }
