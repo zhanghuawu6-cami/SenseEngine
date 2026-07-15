@@ -1,7 +1,8 @@
 """Runnable integration demo for the SenseEngine state loop."""
 
+import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Final, TypeAlias, TypedDict, cast
@@ -236,3 +237,62 @@ class SenseEngine:
             estimate=estimate,
         )
         return intervention
+
+
+def build_demo_events() -> tuple[StateEvent, ...]:
+    """Return deterministic scenarios for all three intervention outcomes."""
+    return (
+        StateEvent(
+            scenario_description="Low-confidence evidence asks for confirmation",
+            computer_activity="unknown",
+            context_evidence={},
+        ),
+        StateEvent(
+            scenario_description="A 90-minute meeting exceeds the personal baseline",
+            computer_activity="neutral",
+            context_evidence={"activity": "Meeting", "meeting_minutes": 90},
+        ),
+        StateEvent(
+            scenario_description="Focused work remains quiet after the meeting",
+            computer_activity="flow",
+            context_evidence={},
+        ),
+    )
+
+
+def _json(value: object) -> str:
+    """Render demo values as readable UTF-8 JSON."""
+    return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def main() -> None:
+    """Run and print the deterministic SenseEngine demonstration."""
+    clock = RealTimeClock()
+    engine = SenseEngine(
+        StatePerceptor(clock=clock),
+        StateEstimator(),
+        StateMemoryBank(clock=clock),
+        InterventionPolicy(),
+        clock=clock,
+    )
+
+    print("SenseEngine State Loop Demo")
+    for index, event in enumerate(build_demo_events(), start=1):
+        intervention = engine.run_once(event)
+        trace = engine.last_trace
+        if trace is None:
+            raise RuntimeError("successful run did not produce a trace")
+
+        print(f"\n=== Scenario {index}: {event.scenario_description} ===")
+        print("Input event:")
+        print(_json(asdict(event)))
+        print(f"Run time: {trace.run_at.isoformat()}")
+        print(f"Historical baseline: {trace.baseline:.2f}")
+        print("State estimate:")
+        print(_json(trace.estimate.model_dump(mode="json")))
+        print("Intervention:")
+        print(_json(intervention.model_dump(mode="json")))
+
+
+if __name__ == "__main__":
+    main()

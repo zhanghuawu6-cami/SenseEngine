@@ -1,5 +1,6 @@
 """Integration tests for the SenseEngine state-loop demo."""
 
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -136,3 +137,21 @@ def test_perceptor_rejects_invalid_demo_evidence(
 
     with pytest.raises(ValueError, match=message):
         perceptor.perceive(event)
+
+
+def test_demo_script_runs_and_prints_all_actions() -> None:
+    completed = subprocess.run(
+        [sys.executable, "examples/state_loop_demo.py"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert '"type": "Ask"' in completed.stdout
+    assert '"type": "Suggest Break"' in completed.stdout
+    assert '"type": "Silence"' in completed.stdout
+    assert "Historical baseline:" in completed.stdout
+    assert "State estimate:" in completed.stdout
+    assert "Intervention:" in completed.stdout
