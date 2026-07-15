@@ -3,8 +3,9 @@
 import logging
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, Request, Security
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 
 from sense_engine.api.demo_service import DemoService
 from sense_engine.api.schemas import ApiError, DemoRunResponse, ErrorResponse
@@ -14,6 +15,10 @@ from sense_engine.policy.intervention_policy import InterventionPolicy
 
 logger = logging.getLogger(__name__)
 ApiErrorCode = Literal["unauthorized", "invalid_request", "demo_unavailable"]
+service_key_header = APIKeyHeader(
+    name="X-SenseEngine-Service-Key",
+    auto_error=False,
+)
 
 
 def error_response(
@@ -30,6 +35,24 @@ def error_response(
     )
 
 
+async def _request_has_body(request: Request) -> bool:
+    """Detect a request body without aggregating an unbounded stream."""
+    content_lengths = request.headers.getlist("content-length")
+    if content_lengths:
+        if len(content_lengths) != 1:
+            return True
+        content_length = content_lengths[0]
+        if not content_length.isascii() or not content_length.isdigit():
+            return True
+        if any(character != "0" for character in content_length):
+            return True
+
+    async for chunk in request.stream():
+        if chunk:
+            return True
+    return False
+
+
 def create_app(
     *,
     settings: ApiSettings | None = None,
@@ -37,7 +60,7 @@ def create_app(
 ) -> FastAPI:
     """Create the SenseEngine API application."""
     resolved_settings = settings if settings is not None else ApiSettings.from_env()
-    resolved_service = service if service is not None else DemoService()
+    resolved_service = service
     application = FastAPI(title="SenseEngine API", version="1.0.0")
 
     @application.get("/health/live")
@@ -52,19 +75,27 @@ def create_app(
         InterventionPolicy()
         return {"status": "ready"}
 
-    @application.post("/v1/demo/run", response_model=DemoRunResponse)
+    @application.post(
+        "/v1/demo/run",
+        response_model=DemoRunResponse,
+        responses={
+            400: {"model": ErrorResponse},
+            401: {"model": ErrorResponse},
+            503: {"model": ErrorResponse},
+        },
+    )
     async def demo_run(
         request: Request,
         service_key: Annotated[
             str | None,
-            Header(alias="X-SenseEngine-Service-Key"),
+            Security(service_key_header),
         ] = None,
     ) -> JSONResponse:
         """Run the fixed demo for an authenticated bodyless request."""
         if not is_authorized(service_key, resolved_settings.service_key):
             return error_response(401, "unauthorized", "Unauthorized.")
 
-        if await request.body():
+        if await _request_has_body(request):
             return error_response(
                 400,
                 "invalid_request",
@@ -72,7 +103,10 @@ def create_app(
             )
 
         try:
-            result = resolved_service.run()
+            request_service = (
+                resolved_service if resolved_service is not None else DemoService()
+            )
+            result = request_service.run()
         except Exception as error:
             logger.error("demo_run_failed type=%s", type(error).__name__)
             return error_response(

@@ -1,13 +1,16 @@
 """Tests for the authenticated SenseEngine API boundary."""
 
+import asyncio
 import hmac
 import logging
 import os
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.types import Message, Scope
 
 import sense_engine.api.app as app_module
 from sense_engine.api.demo_service import DemoService
@@ -48,6 +51,71 @@ def assert_error_response(
     assert response_status == expected_status
     parsed = ErrorResponse.model_validate(response_json)
     assert parsed == ErrorResponse(error=ApiError(code=code, message=message))
+
+
+def http_request_message(body: bytes, *, more_body: bool) -> Message:
+    """Build one ASGI request message for streaming boundary tests."""
+    return {"type": "http.request", "body": body, "more_body": more_body}
+
+
+def invoke_demo_asgi(
+    application: FastAPI,
+    *,
+    request_messages: tuple[Message, ...],
+    content_length_headers: tuple[tuple[bytes, bytes], ...] = (),
+    service_key: bytes = b"test-service-key",
+) -> tuple[int, bytes, int]:
+    """Invoke the demo route while counting exactly how often it reads receive."""
+
+    async def invoke() -> tuple[int, bytes, int]:
+        receive_calls = 0
+        sent_messages: list[Message] = []
+
+        async def receive() -> Message:
+            nonlocal receive_calls
+            if receive_calls >= len(request_messages):
+                raise AssertionError("application consumed an unexpected request chunk")
+            message = request_messages[receive_calls]
+            receive_calls += 1
+            return message
+
+        async def send(message: Message) -> None:
+            sent_messages.append(message)
+
+        scope: Scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/v1/demo/run",
+            "raw_path": b"/v1/demo/run",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"host", b"testserver"),
+                (b"x-senseengine-service-key", service_key),
+                *content_length_headers,
+            ],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+        }
+        await application(scope, receive, send)
+
+        start_messages = [
+            message
+            for message in sent_messages
+            if message["type"] == "http.response.start"
+        ]
+        assert len(start_messages) == 1
+        response_body = b"".join(
+            cast(bytes, message.get("body", b""))
+            for message in sent_messages
+            if message["type"] == "http.response.body"
+        )
+        return cast(int, start_messages[0]["status"]), response_body, receive_calls
+
+    return asyncio.run(invoke())
 
 
 def test_api_environment_uses_exact_test_values() -> None:
@@ -120,6 +188,77 @@ def test_constructor_failure_keeps_liveness_available(
     assert readiness_response.status_code == 500
     assert liveness_response.status_code == 200
     assert liveness_response.json() == {"status": "alive"}
+
+
+def test_default_demo_failure_does_not_prevent_health_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sense_engine.api.security import ApiSettings
+
+    def fail_constructor() -> None:
+        raise RuntimeError("core component unavailable")
+
+    monkeypatch.setattr(app_module, "DemoService", fail_constructor)
+    monkeypatch.setattr(app_module, "StateEstimator", fail_constructor)
+
+    application = app_module.create_app(
+        settings=ApiSettings(service_key="isolated-key", environment="test")
+    )
+    health_client = TestClient(application, raise_server_exceptions=False)
+
+    liveness_response = health_client.get("/health/live")
+    readiness_response = health_client.get("/health/ready")
+
+    assert liveness_response.status_code == 200
+    assert liveness_response.json() == {"status": "alive"}
+    assert readiness_response.status_code == 500
+
+
+def test_demo_run_openapi_declares_api_key_security() -> None:
+    from sense_engine.api.security import ApiSettings
+
+    application = app_module.create_app(
+        settings=ApiSettings(service_key="schema-key", environment="test"),
+        service=CountingDemoService(),
+    )
+
+    schema = application.openapi()
+    security_schemes = schema["components"].get("securitySchemes", {})
+    matching_schemes = [
+        name
+        for name, definition in security_schemes.items()
+        if definition
+        == {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-SenseEngine-Service-Key",
+        }
+    ]
+    operation = schema["paths"]["/v1/demo/run"]["post"]
+
+    assert len(matching_schemes) == 1
+    assert operation["security"] == [{matching_schemes[0]: []}]
+    assert all(
+        parameter.get("name") != "X-SenseEngine-Service-Key"
+        for parameter in operation.get("parameters", [])
+    )
+
+
+def test_demo_run_openapi_declares_stable_error_responses() -> None:
+    from sense_engine.api.security import ApiSettings
+
+    application = app_module.create_app(
+        settings=ApiSettings(service_key="schema-key", environment="test"),
+        service=CountingDemoService(),
+    )
+
+    responses = application.openapi()["paths"]["/v1/demo/run"]["post"]["responses"]
+
+    assert {"200", "400", "401", "503"} <= responses.keys()
+    for status_code in ("400", "401", "503"):
+        assert responses[status_code]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ErrorResponse"
+        }
 
 
 @pytest.mark.parametrize("provided_key", [None, "", "wrong-service-key"])
@@ -219,6 +358,119 @@ def test_demo_run_rejects_every_nonempty_body_before_calling_service(
     assert service.run_calls == 0
     if body.isascii():
         assert body.decode() not in response.text + caplog.text
+
+
+def test_demo_run_stops_streaming_after_first_nonempty_chunk() -> None:
+    from sense_engine.api.security import ApiSettings
+
+    service = CountingDemoService()
+    application = app_module.create_app(
+        settings=ApiSettings(service_key="test-service-key", environment="test"),
+        service=service,
+    )
+
+    status_code, response_body, receive_calls = invoke_demo_asgi(
+        application,
+        request_messages=(
+            http_request_message(b"first private chunk", more_body=True),
+            http_request_message(b"second private chunk", more_body=False),
+        ),
+    )
+
+    assert status_code == 400
+    assert ErrorResponse.model_validate_json(response_body) == ErrorResponse(
+        error=ApiError(
+            code="invalid_request",
+            message="Request body is not allowed.",
+        )
+    )
+    assert receive_calls == 1
+    assert service.run_calls == 0
+
+
+@pytest.mark.parametrize(
+    "content_length_headers",
+    [
+        ((b"content-length", b"10"),),
+        ((b"content-length", b"invalid"),),
+        ((b"content-length", b"-1"),),
+        ((b"content-length", b"0"), (b"content-length", b"0")),
+    ],
+)
+def test_demo_run_rejects_suspicious_content_length_without_reading_body(
+    content_length_headers: tuple[tuple[bytes, bytes], ...],
+) -> None:
+    from sense_engine.api.security import ApiSettings
+
+    service = CountingDemoService()
+    application = app_module.create_app(
+        settings=ApiSettings(service_key="test-service-key", environment="test"),
+        service=service,
+    )
+
+    status_code, _, receive_calls = invoke_demo_asgi(
+        application,
+        request_messages=(
+            http_request_message(b"must remain unread", more_body=False),
+        ),
+        content_length_headers=content_length_headers,
+    )
+
+    assert status_code == 400
+    assert receive_calls == 0
+    assert service.run_calls == 0
+
+
+@pytest.mark.parametrize(
+    "content_length_headers",
+    [
+        (),
+        ((b"content-length", b"0"),),
+    ],
+)
+def test_demo_run_accepts_empty_stream_with_missing_or_zero_content_length(
+    content_length_headers: tuple[tuple[bytes, bytes], ...],
+) -> None:
+    from sense_engine.api.security import ApiSettings
+
+    service = CountingDemoService()
+    application = app_module.create_app(
+        settings=ApiSettings(service_key="test-service-key", environment="test"),
+        service=service,
+    )
+
+    status_code, _, receive_calls = invoke_demo_asgi(
+        application,
+        request_messages=(http_request_message(b"", more_body=False),),
+        content_length_headers=content_length_headers,
+    )
+
+    assert status_code == 200
+    assert receive_calls == 1
+    assert service.run_calls == 1
+
+
+def test_demo_run_authenticates_before_content_length_or_stream_probe() -> None:
+    from sense_engine.api.security import ApiSettings
+
+    service = CountingDemoService()
+    application = app_module.create_app(
+        settings=ApiSettings(service_key="test-service-key", environment="test"),
+        service=service,
+    )
+
+    status_code, _, receive_calls = invoke_demo_asgi(
+        application,
+        request_messages=(
+            http_request_message(b"unauthorized private body", more_body=False),
+        ),
+        content_length_headers=((b"content-length", b"25"),),
+        service_key=b"wrong-service-key",
+    )
+
+    assert status_code == 401
+    assert receive_calls == 0
+    assert service.run_calls == 0
 
 
 def test_demo_failure_returns_sanitized_unavailable_response_and_log(
