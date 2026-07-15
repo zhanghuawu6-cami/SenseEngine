@@ -83,9 +83,7 @@ class StatePerceptor:
         meeting_minutes = self._meeting_minutes(event)
         captured_at = self._clock()
         preset = ACTIVITY_PRESETS[event.computer_activity]
-        signal_events = (
-            [] if preset is None else [self._signal_event(preset, captured_at)]
-        )
+        signal_events = [] if preset is None else [self._signal_event(preset, captured_at)]
         context = self._context_snapshot(
             activity_name=activity_name,
             meeting_minutes=meeting_minutes,
