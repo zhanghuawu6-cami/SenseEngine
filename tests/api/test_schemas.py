@@ -63,6 +63,19 @@ def test_demo_response_accepts_exact_ordered_scenarios() -> None:
     assert response.baseline_after == 0.65
 
 
+def test_demo_response_serialization_schema_requires_all_response_fields() -> None:
+    schema = DemoRunResponse.model_json_schema(mode="serialization")
+
+    assert schema["required"] == [
+        "schema_version",
+        "mode",
+        "generated_at",
+        "retention",
+        "steps",
+        "baseline_after",
+    ]
+
+
 def test_demo_response_rejects_wrong_scenario_order() -> None:
     with pytest.raises(ValidationError):
         DemoRunResponse(

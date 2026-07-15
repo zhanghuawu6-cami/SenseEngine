@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from sense_engine.core.models.base import ContractModel
 from sense_engine.core.models.common import NonEmptyStr, Probability
@@ -41,6 +41,8 @@ class DemoStep(ContractModel):
 
 class DemoRunResponse(ContractModel):
     """Return exactly one complete, ordered three-scenario simulation."""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
     schema_version: Literal["1.0"] = "1.0"
     mode: Literal["simulation"] = "simulation"
