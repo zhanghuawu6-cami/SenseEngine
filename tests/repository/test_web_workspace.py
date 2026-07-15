@@ -13,6 +13,7 @@ REQUIRED_WEB_FILES = (
     "public/uploads/.gitkeep",
 )
 GENERATED_WEB_PATHS = (
+    "web/next-env.d.ts",
     "web/tsconfig.tsbuildinfo",
     "web/.next/cache/probe",
     "web/node_modules/probe",
@@ -44,6 +45,7 @@ def test_web_workspace_does_not_track_local_artifacts() -> None:
         for path in tracked_paths
         if "node_modules" in path.parts
         or ".next" in path.parts
+        or path == PurePosixPath("web/next-env.d.ts")
         or (
             path.name.startswith(".env")
             and path != PurePosixPath("web/.env.example")
