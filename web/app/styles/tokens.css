@@ -13,6 +13,6 @@
   --radius-panel: 6px;
   --shell-max: 1280px;
   --space-page: clamp(20px, 5vw, 72px);
-  --font-sans: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --sense-font-sans: Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --sense-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
