@@ -8,6 +8,13 @@ function notFound() {
   return NextResponse.json({ error: "图片不存在" }, { status: 404 });
 }
 
+function storageErrorCode(error: unknown) {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? error.code
+    : undefined;
+  return typeof code === "string" ? code : "UNKNOWN";
+}
+
 export async function GET(
   _request: Request,
   context: { params: Promise<{ filename: string }> },
@@ -27,7 +34,13 @@ export async function GET(
         "Content-Type": media.mimeType,
       },
     });
-  } catch {
-    return notFound();
+  } catch (error) {
+    const code = storageErrorCode(error);
+    if (code === "ENOENT" || code === "ELOOP") return notFound();
+    console.error("media_storage_read_failed", code);
+    return NextResponse.json(
+      { error: "服务器暂时无法完成请求" },
+      { status: 500 },
+    );
   }
 }

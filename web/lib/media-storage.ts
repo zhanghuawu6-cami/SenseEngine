@@ -1,3 +1,4 @@
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -8,6 +9,10 @@ export function isSafeMediaFilename(filename: string) {
     !filename.includes("/") &&
     !filename.includes("\\") &&
     !path.isAbsolute(filename);
+}
+
+export function resolveMediaRoot(cwd: string, configuredRoot?: string) {
+  return path.resolve(cwd, configuredRoot || "./data/media");
 }
 
 export class LocalMediaStorage {
@@ -31,7 +36,15 @@ export class LocalMediaStorage {
   }
 
   async read(filename: string) {
-    return fs.readFile(this.resolve(filename));
+    const file = await fs.open(
+      this.resolve(filename),
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+    );
+    try {
+      return await file.readFile();
+    } finally {
+      await file.close();
+    }
   }
 
   async delete(filename: string) {
@@ -44,5 +57,5 @@ export class LocalMediaStorage {
 }
 
 export const mediaStorage = new LocalMediaStorage(
-  path.resolve(process.cwd(), process.env.MEDIA_ROOT || "./public/uploads"),
+  resolveMediaRoot(process.cwd(), process.env.MEDIA_ROOT),
 );

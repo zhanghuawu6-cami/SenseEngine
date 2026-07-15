@@ -92,7 +92,26 @@ describe("admin media storage integration", () => {
     expect(mediaStorage.delete).toHaveBeenCalledWith(filename);
   });
 
-  it("deletes the database record before deleting through media storage", async () => {
+  it("preserves the database conflict response when upload cleanup also fails", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(repository.createMedia).mockImplementation(() => {
+      throw new Error("UNIQUE constraint failed: media.filename");
+    });
+    vi.mocked(mediaStorage.delete).mockRejectedValue(
+      Object.assign(new Error("EIO: cleanup failed at '/private/media/asset.png'"), { code: "EIO" }),
+    );
+
+    const response = await POST(uploadRequest("Asset.png"));
+    const body = await response.text();
+
+    expect(response.status).toBe(409);
+    expect(JSON.parse(body)).toEqual({ error: "Slug 或文件名已经存在" });
+    expect(body).not.toContain("EIO");
+    expect(body).not.toContain("/private/media");
+    expect(log).toHaveBeenCalledWith("media_storage_rollback_failed", "EIO");
+  });
+
+  it("deletes through media storage before deleting the database record", async () => {
     const asset: MediaAsset = {
       id: "media-1",
       filename: "asset.png",
@@ -114,7 +133,27 @@ describe("admin media storage integration", () => {
     expect(repository.deleteMedia).toHaveBeenCalledWith("media-1");
     expect(mediaStorage.delete).toHaveBeenCalledWith("asset.png");
     expect(fs.unlink).not.toHaveBeenCalled();
-    expect(vi.mocked(repository.deleteMedia).mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(mediaStorage.delete).mock.invocationCallOrder[0]);
+    expect(vi.mocked(mediaStorage.delete).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(repository.deleteMedia).mock.invocationCallOrder[0]);
+  });
+
+  it("keeps the database record when storage deletion fails", async () => {
+    vi.mocked(repository.getMedia).mockReturnValue({
+      id: "media-1",
+      filename: "asset.png",
+      originalName: "Asset.png",
+      mimeType: "image/png",
+      size: png.length,
+      url: "/api/media/asset.png",
+      createdAt: "2026-07-15T00:00:00.000Z",
+    });
+    vi.mocked(mediaStorage.delete).mockRejectedValue(new Error("storage unavailable"));
+
+    await expect(DELETE(
+      new Request("http://localhost/api/admin/media/media-1", { method: "DELETE" }),
+      { params: Promise.resolve({ id: "media-1" }) },
+    )).rejects.toThrow("storage unavailable");
+
+    expect(repository.deleteMedia).not.toHaveBeenCalled();
   });
 });

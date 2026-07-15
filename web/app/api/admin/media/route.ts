@@ -9,6 +9,13 @@ export const runtime = "nodejs";
 
 const MAX_FILE_SIZE = 6 * 1024 * 1024;
 
+function storageErrorCode(error: unknown) {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? error.code
+    : undefined;
+  return typeof code === "string" ? code : "UNKNOWN";
+}
+
 function detectImage(buffer: Buffer) {
   if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
     return { mime: "image/png", extension: ".png" };
@@ -55,7 +62,11 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ media }, { status: 201 });
   } catch (error) {
-    await mediaStorage.delete(filename);
+    try {
+      await mediaStorage.delete(filename);
+    } catch (cleanupError) {
+      console.error("media_storage_rollback_failed", storageErrorCode(cleanupError));
+    }
     return conflictError(error);
   }
 }

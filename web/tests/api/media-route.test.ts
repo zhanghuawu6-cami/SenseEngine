@@ -75,17 +75,34 @@ describe("GET /api/media/[filename]", () => {
     expect(mediaStorage.read).not.toHaveBeenCalled();
   });
 
-  it("returns a generic 404 when the stored file is missing", async () => {
+  it.each(["ENOENT", "ELOOP"])("returns a generic 404 for storage error %s", async (code) => {
     vi.mocked(repository.getMediaByFilename).mockReturnValue(asset);
     vi.mocked(mediaStorage.read).mockRejectedValue(
-      Object.assign(new Error("ENOENT: no such file, open '/private/uploads/asset.png'"), { code: "ENOENT" }),
+      Object.assign(new Error(`${code}: storage failure at '/private/media/asset.png'`), { code }),
     );
 
     const response = await getMedia("asset.png");
     const body = await response.text();
 
     expect(response.status).toBe(404);
-    expect(body).not.toContain("ENOENT");
-    expect(body).not.toContain("/private/uploads");
+    expect(body).not.toContain(code);
+    expect(body).not.toContain("/private/media");
+  });
+
+  it("returns a generic 500 and logs only the code for an unexpected storage error", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(repository.getMediaByFilename).mockReturnValue(asset);
+    vi.mocked(mediaStorage.read).mockRejectedValue(
+      Object.assign(new Error("EIO: device failure at '/private/media/asset.png'"), { code: "EIO" }),
+    );
+
+    const response = await getMedia("asset.png");
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(body).not.toContain("EIO");
+    expect(body).not.toContain("device failure");
+    expect(body).not.toContain("/private/media");
+    expect(log).toHaveBeenCalledWith("media_storage_read_failed", "EIO");
   });
 });
