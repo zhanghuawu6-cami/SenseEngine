@@ -212,6 +212,13 @@ export const repository = {
     return row ? mapMedia(row) : null;
   },
 
+  getMediaByFilename(filename: string) {
+    const row = getDatabase()
+      .prepare("SELECT * FROM media WHERE filename = ?")
+      .get(filename) as Row | undefined;
+    return row ? mapMedia(row) : null;
+  },
+
   deleteMedia(id: string) {
     return getDatabase().prepare("DELETE FROM media WHERE id = ?").run(id).changes > 0;
   },

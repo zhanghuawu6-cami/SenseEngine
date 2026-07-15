@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { protectAdmin, conflictError } from "@/lib/http";
+import { mediaStorage } from "@/lib/media-storage";
 import { repository } from "@/lib/repository";
 
 export const runtime = "nodejs";
@@ -44,21 +44,18 @@ export async function POST(request: Request) {
   }
 
   const filename = `${randomUUID()}${detected.extension}`;
-  const uploadDirectory = path.join(process.cwd(), "public", "uploads");
-  const filePath = path.join(uploadDirectory, filename);
-  await fs.mkdir(uploadDirectory, { recursive: true });
-  await fs.writeFile(filePath, buffer, { flag: "wx" });
+  await mediaStorage.write(filename, buffer);
   try {
     const media = repository.createMedia({
       filename,
       originalName: path.basename(file.name).slice(0, 240),
       mimeType: detected.mime,
       size: file.size,
-      url: `/uploads/${filename}`,
+      url: `/api/media/${filename}`,
     });
     return NextResponse.json({ media }, { status: 201 });
   } catch (error) {
-    await fs.unlink(filePath).catch(() => undefined);
+    await mediaStorage.delete(filename);
     return conflictError(error);
   }
 }
