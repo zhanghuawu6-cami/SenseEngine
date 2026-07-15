@@ -75,7 +75,8 @@ describe("GET /api/media/[filename]", () => {
     expect(mediaStorage.read).not.toHaveBeenCalled();
   });
 
-  it.each(["ENOENT", "ELOOP"])("returns a generic 404 for storage error %s", async (code) => {
+  it.each(["ENOENT", "ELOOP", "EMLINK"])("returns a generic 404 for storage error %s", async (code) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.mocked(repository.getMediaByFilename).mockReturnValue(asset);
     vi.mocked(mediaStorage.read).mockRejectedValue(
       Object.assign(new Error(`${code}: storage failure at '/private/media/asset.png'`), { code }),
@@ -87,6 +88,7 @@ describe("GET /api/media/[filename]", () => {
     expect(response.status).toBe(404);
     expect(body).not.toContain(code);
     expect(body).not.toContain("/private/media");
+    expect(log).not.toHaveBeenCalled();
   });
 
   it("returns a generic 500 and logs only the code for an unexpected storage error", async () => {

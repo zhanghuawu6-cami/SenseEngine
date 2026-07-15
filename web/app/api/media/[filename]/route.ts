@@ -36,7 +36,7 @@ export async function GET(
     });
   } catch (error) {
     const code = storageErrorCode(error);
-    if (code === "ENOENT" || code === "ELOOP") return notFound();
+    if (code === "ENOENT" || code === "ELOOP" || code === "EMLINK") return notFound();
     console.error("media_storage_read_failed", code);
     return NextResponse.json(
       { error: "服务器暂时无法完成请求" },
