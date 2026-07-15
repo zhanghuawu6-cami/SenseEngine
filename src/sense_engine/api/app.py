@@ -15,8 +15,9 @@ from sense_engine.policy.intervention_policy import InterventionPolicy
 
 logger = logging.getLogger(__name__)
 ApiErrorCode = Literal["unauthorized", "invalid_request", "demo_unavailable"]
+SERVICE_KEY_HEADER_NAME = "X-SenseEngine-Service-Key"
 service_key_header = APIKeyHeader(
-    name="X-SenseEngine-Service-Key",
+    name=SERVICE_KEY_HEADER_NAME,
     auto_error=False,
 )
 
@@ -92,7 +93,14 @@ def create_app(
         ] = None,
     ) -> JSONResponse:
         """Run the fixed demo for an authenticated bodyless request."""
-        if not is_authorized(service_key, resolved_settings.service_key):
+        provided_keys = request.headers.getlist(SERVICE_KEY_HEADER_NAME)
+        if len(provided_keys) != 1:
+            return error_response(401, "unauthorized", "Unauthorized.")
+        provided_key = provided_keys[0]
+        if (
+            not is_authorized(provided_key, resolved_settings.service_key)
+            or service_key != provided_key
+        ):
             return error_response(401, "unauthorized", "Unauthorized.")
 
         if await _request_has_body(request):

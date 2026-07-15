@@ -63,11 +63,11 @@ def invoke_demo_asgi(
     *,
     request_messages: tuple[Message, ...],
     content_length_headers: tuple[tuple[bytes, bytes], ...] = (),
-    service_key: bytes = b"test-service-key",
-) -> tuple[int, bytes, int]:
+    service_key_headers: tuple[bytes, ...] = (b"test-service-key",),
+) -> tuple[int, bytes, int, dict[bytes, bytes]]:
     """Invoke the demo route while counting exactly how often it reads receive."""
 
-    async def invoke() -> tuple[int, bytes, int]:
+    async def invoke() -> tuple[int, bytes, int, dict[bytes, bytes]]:
         receive_calls = 0
         sent_messages: list[Message] = []
 
@@ -94,7 +94,10 @@ def invoke_demo_asgi(
             "root_path": "",
             "headers": [
                 (b"host", b"testserver"),
-                (b"x-senseengine-service-key", service_key),
+                *(
+                    (b"x-senseengine-service-key", service_key)
+                    for service_key in service_key_headers
+                ),
                 *content_length_headers,
             ],
             "client": ("testclient", 50000),
@@ -113,7 +116,18 @@ def invoke_demo_asgi(
             for message in sent_messages
             if message["type"] == "http.response.body"
         )
-        return cast(int, start_messages[0]["status"]), response_body, receive_calls
+        response_headers = dict(
+            cast(
+                list[tuple[bytes, bytes]],
+                start_messages[0].get("headers", []),
+            )
+        )
+        return (
+            cast(int, start_messages[0]["status"]),
+            response_body,
+            receive_calls,
+            response_headers,
+        )
 
     return asyncio.run(invoke())
 
@@ -369,7 +383,7 @@ def test_demo_run_stops_streaming_after_first_nonempty_chunk() -> None:
         service=service,
     )
 
-    status_code, response_body, receive_calls = invoke_demo_asgi(
+    status_code, response_body, receive_calls, _ = invoke_demo_asgi(
         application,
         request_messages=(
             http_request_message(b"first private chunk", more_body=True),
@@ -408,7 +422,7 @@ def test_demo_run_rejects_suspicious_content_length_without_reading_body(
         service=service,
     )
 
-    status_code, _, receive_calls = invoke_demo_asgi(
+    status_code, _, receive_calls, _ = invoke_demo_asgi(
         application,
         request_messages=(
             http_request_message(b"must remain unread", more_body=False),
@@ -439,7 +453,7 @@ def test_demo_run_accepts_empty_stream_with_missing_or_zero_content_length(
         service=service,
     )
 
-    status_code, _, receive_calls = invoke_demo_asgi(
+    status_code, _, receive_calls, _ = invoke_demo_asgi(
         application,
         request_messages=(http_request_message(b"", more_body=False),),
         content_length_headers=content_length_headers,
@@ -459,16 +473,50 @@ def test_demo_run_authenticates_before_content_length_or_stream_probe() -> None:
         service=service,
     )
 
-    status_code, _, receive_calls = invoke_demo_asgi(
+    status_code, _, receive_calls, _ = invoke_demo_asgi(
         application,
         request_messages=(
             http_request_message(b"unauthorized private body", more_body=False),
         ),
         content_length_headers=((b"content-length", b"25"),),
-        service_key=b"wrong-service-key",
+        service_key_headers=(b"wrong-service-key",),
     )
 
     assert status_code == 401
+    assert receive_calls == 0
+    assert service.run_calls == 0
+
+
+@pytest.mark.parametrize(
+    "service_key_headers",
+    [
+        (b"test-service-key", b"wrong-service-key"),
+        (b"wrong-service-key", b"test-service-key"),
+        (b"test-service-key", b"test-service-key"),
+    ],
+)
+def test_demo_run_rejects_duplicate_service_key_headers(
+    service_key_headers: tuple[bytes, ...],
+) -> None:
+    from sense_engine.api.security import ApiSettings
+
+    service = CountingDemoService()
+    application = app_module.create_app(
+        settings=ApiSettings(service_key="test-service-key", environment="test"),
+        service=service,
+    )
+
+    status_code, response_body, receive_calls, response_headers = invoke_demo_asgi(
+        application,
+        request_messages=(http_request_message(b"", more_body=False),),
+        service_key_headers=service_key_headers,
+    )
+
+    assert status_code == 401
+    assert ErrorResponse.model_validate_json(response_body) == ErrorResponse(
+        error=ApiError(code="unauthorized", message="Unauthorized.")
+    )
+    assert response_headers[b"cache-control"] == b"no-store"
     assert receive_calls == 0
     assert service.run_calls == 0
 
