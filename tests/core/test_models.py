@@ -137,13 +137,14 @@ def make_populated_context_snapshot() -> ContextSnapshot:
 
 
 def make_state_estimate() -> StateEstimate:
-    """Build a valid state estimate that preserves distribution uncertainty."""
+    """Build a valid v0.3 state estimate with explanatory evidence."""
     return StateEstimate(
         dimensions={"cognitive_load": 0.62},
         distribution={"focused": 0.55, "fatigued": 0.20},
         confidence=0.71,
         missingness={"calendar": 0.40},
         model_version="state-rules-v0.2",
+        explanation=("Synthetic evidence for contract testing.",),
     )
 
 
@@ -418,15 +419,57 @@ def test_context_nested_models_have_exact_v02_fields() -> None:
     assert set(EnvironmentContext.model_fields) == {"captured_at", "features"}
 
 
-def test_state_estimate_has_exact_v02_fields() -> None:
-    """StateEstimate exposes only the Appendix A.1 contract fields."""
+def test_state_estimate_has_exact_v03_fields() -> None:
+    """StateEstimate v0.3 adds an explainability field to Appendix A.1."""
     assert set(StateEstimate.model_fields) == {
         "dimensions",
         "distribution",
         "confidence",
         "missingness",
         "model_version",
+        "explanation",
     }
+
+
+def test_state_estimate_requires_explanation() -> None:
+    """Every v0.3 estimate must include explicit explanatory evidence."""
+    payload = make_state_estimate().model_dump()
+    payload.pop("explanation")
+
+    with pytest.raises(ValidationError) as error:
+        StateEstimate.model_validate(payload)
+
+    assert any(item["loc"] == ("explanation",) for item in error.value.errors())
+
+
+@pytest.mark.parametrize(
+    ("explanation", "expected_error_type"),
+    [
+        ((), "too_short"),
+        (("   ",), "string_too_short"),
+    ],
+)
+def test_state_estimate_rejects_empty_explanations(
+    explanation: tuple[str, ...],
+    expected_error_type: str,
+) -> None:
+    """Explanation tuples and their individual messages cannot be empty."""
+    payload = make_state_estimate().model_dump()
+    payload["explanation"] = explanation
+
+    with pytest.raises(ValidationError) as error:
+        StateEstimate.model_validate(payload)
+
+    assert any(item["type"] == expected_error_type for item in error.value.errors())
+
+
+def test_state_estimate_explanation_has_chinese_schema_description() -> None:
+    """Explainability semantics remain visible in generated API schemas."""
+    description = StateEstimate.model_fields["explanation"].description
+
+    assert description is not None
+    assert "解释" in description
+    assert "证据" in description
 
 
 def test_explicit_context_snapshot_is_valid() -> None:

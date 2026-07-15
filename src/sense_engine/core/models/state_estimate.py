@@ -10,10 +10,11 @@ from sense_engine.core.models.common import FiniteFloat, NonEmptyStr, Probabilit
 DimensionMap = Annotated[dict[NonEmptyStr, FiniteFloat], Field(min_length=1)]
 DistributionMap = Annotated[dict[NonEmptyStr, Probability], Field(min_length=1)]
 MissingnessMap = dict[NonEmptyStr, Probability]
+ExplanationList = Annotated[tuple[NonEmptyStr, ...], Field(min_length=1)]
 
 
 class StateEstimate(ContractModel):
-    """Represent a versioned State Computing result with explicit uncertainty."""
+    """Represent a v0.3 state result with uncertainty and evidence."""
 
     dimensions: DimensionMap = Field(
         description="连续状态维度及其有限数值，例如认知负荷，用于表达 State Computing 的多维估计结果。"
@@ -29,4 +30,7 @@ class StateEstimate(ContractModel):
     )
     model_version: NonEmptyStr = Field(
         description="生成该估计的模型或规则版本，用于复现、追溯并比较 State Computing 结果。"
+    )
+    explanation: ExplanationList = Field(
+        description="支持本次概率估计的人类可读主要证据与解释，用于建立用户信任并支持审计。"
     )
