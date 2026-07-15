@@ -42,6 +42,9 @@ pip-wheel-metadata/
 *.swp
 *.swo
 
+# Local Superpowers visual brainstorming artifacts
+.superpowers/
+
 # Jupyter and macOS metadata
 .ipynb_checkpoints/
 .DS_Store
