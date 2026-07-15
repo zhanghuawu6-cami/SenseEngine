@@ -1,7 +1,7 @@
 # State Memory 与 Intervention Policy 设计规格
 
 **日期：** 2026-07-15
-**状态：** 设计已批准，书面规格待复核
+**状态：** 已批准
 **适用系统：** SenseEngine State Runtime / Memory / Policy
 
 ## 1. 目标
