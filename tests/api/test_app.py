@@ -237,7 +237,7 @@ def test_demo_failure_returns_sanitized_unavailable_response_and_log(
         response.json(),
         expected_status=503,
         code="demo_unavailable",
-        message="Demo is temporarily unavailable.",
+        message="SenseEngine demo is temporarily unavailable.",
     )
     assert response.headers["cache-control"] == "no-store"
     assert set(response.json()) == {"error"}

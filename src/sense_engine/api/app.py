@@ -78,7 +78,7 @@ def create_app(
             return error_response(
                 503,
                 "demo_unavailable",
-                "Demo is temporarily unavailable.",
+                "SenseEngine demo is temporarily unavailable.",
             )
 
         return JSONResponse(
