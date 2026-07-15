@@ -12,6 +12,15 @@ REQUIRED_WEB_FILES = (
     "lib/db.ts",
     "public/uploads/.gitkeep",
 )
+GENERATED_WEB_PATHS = (
+    "web/tsconfig.tsbuildinfo",
+    "web/.next/cache/probe",
+    "web/node_modules/probe",
+    "web/data/senseorder.db",
+    "web/data/senseorder.db-wal",
+    "web/data/media/probe",
+    "web/public/uploads/probe",
+)
 
 
 def test_web_workspace_contains_required_files() -> None:
@@ -49,3 +58,17 @@ def test_web_workspace_does_not_track_local_artifacts() -> None:
     ]
 
     assert not forbidden, f"Forbidden tracked web artifacts: {forbidden}"
+
+
+def test_web_workspace_ignores_generated_paths() -> None:
+    result = subprocess.run(
+        ["git", "check-ignore", "--no-index", *GENERATED_WEB_PATHS],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    ignored_paths = result.stdout.splitlines()
+
+    assert ignored_paths == list(GENERATED_WEB_PATHS)
