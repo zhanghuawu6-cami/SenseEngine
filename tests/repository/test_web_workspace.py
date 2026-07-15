@@ -3,12 +3,14 @@ from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_WEB_FILES = (
+    ".env.example",
     "package.json",
     "package-lock.json",
     "app/page.tsx",
     "app/layout.tsx",
     "components/SiteHeader.tsx",
     "lib/db.ts",
+    "public/uploads/.gitkeep",
 )
 
 
@@ -33,7 +35,10 @@ def test_web_workspace_does_not_track_local_artifacts() -> None:
         for path in tracked_paths
         if "node_modules" in path.parts
         or ".next" in path.parts
-        or path.name.startswith(".env")
+        or (
+            path.name.startswith(".env")
+            and path != PurePosixPath("web/.env.example")
+        )
         or path.name == ".DS_Store"
         or path.name.endswith(".db")
         or ".db-" in path.name
