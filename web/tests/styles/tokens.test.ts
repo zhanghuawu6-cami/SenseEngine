@@ -90,4 +90,12 @@ describe("shared design tokens", () => {
     expect(legacyRoot.get("--amber-500")).toBe("var(--color-action)");
     expect(legacyRoot.get("--shell")).toBe("var(--shell-max)");
   });
+
+  it("keeps the fifth navigation link within medium-width header tracks", () => {
+    const globals = readFileSync(resolve(process.cwd(), "app/globals.css"), "utf8");
+
+    expect(globals).toMatch(
+      /@media\s+\(min-width:\s*821px\)\s+and\s+\(max-width:\s*900px\)\s*\{\s*\.site-header__inner\.shell\s*\{\s*grid-template-columns:\s*210px minmax\(0,\s*1fr\) 170px;\s*\}\s*\.desktop-nav\s*\{\s*gap:\s*24px;\s*\}\s*\}/,
+    );
+  });
 });
