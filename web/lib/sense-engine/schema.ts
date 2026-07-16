@@ -1,12 +1,12 @@
 import { z } from "zod";
-import type { DemoAction, DemoRunResponse } from "@/lib/sense-engine/types";
+import type { DemoRunResponse, DemoStep } from "@/lib/sense-engine/types";
 
 const finiteNumber = z.number().finite();
 const finiteProbability = finiteNumber.min(0).max(1);
 const nonEmptyString = z.string().min(1);
 const nonEmptyKey = z.string().min(1);
 
-type FiniteJsonValue = DemoAction["parameters"][string];
+type FiniteJsonValue = DemoStep["intervention"]["action"]["parameters"][string];
 
 const finiteJsonValue: z.ZodType<FiniteJsonValue> = z.lazy(() =>
   z.union([
@@ -40,8 +40,8 @@ const interventionSchema = z.strictObject({
   objective: nonEmptyString,
   reversibility: z.strictObject({
     is_reversible: z.boolean(),
-    method: nonEmptyString.nullable().optional(),
-    recovery_seconds: finiteNumber.min(0).nullable().optional(),
+    method: nonEmptyString.nullable(),
+    recovery_seconds: finiteNumber.min(0).nullable(),
   }),
   risk: z.strictObject({
     level: z.enum(["low", "medium", "high"]),

@@ -2,8 +2,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { demoRunSchema } from "@/lib/sense-engine/schema";
+import type { DemoAction, DemoPublicError, DemoStep } from "@/lib/sense-engine/types";
 
 const fixture: unknown = JSON.parse(
   fs.readFileSync(path.resolve(process.cwd(), "../contracts/demo-response.json"), "utf8"),
@@ -30,6 +31,17 @@ function interventionOf(step: JsonObject): JsonObject {
 }
 
 describe("demoRunSchema", () => {
+  it("exposes the web-facing action and public error types", () => {
+    const action: DemoAction = "Ask";
+    const publicError: DemoPublicError = {
+      error: { code: "demo_unavailable", message: "Demo unavailable" },
+    };
+
+    expectTypeOf<DemoAction>().toEqualTypeOf<DemoStep["intervention"]["action"]["type"]>();
+    expect(action).toBe("Ask");
+    expect(publicError.error.code).toBe("demo_unavailable");
+  });
+
   it("parses the complete generated demo fixture without dropping nested data", () => {
     const parsed = demoRunSchema.parse(fixture);
 
@@ -252,4 +264,16 @@ describe("demoRunSchema", () => {
     expect(demoRunSchema.safeParse(invalidRisk).success).toBe(false);
     expect(demoRunSchema.safeParse(invalidRecovery).success).toBe(false);
   });
+
+  it.each(["method", "recovery_seconds"])(
+    "rejects reversibility without required %s",
+    (field) => {
+      const candidate = mutateFixture((value) => {
+        const reversibility = interventionOf(stepsOf(value)[0]).reversibility as JsonObject;
+        delete reversibility[field];
+      });
+
+      expect(demoRunSchema.safeParse(candidate).success).toBe(false);
+    },
+  );
 });
