@@ -18,9 +18,13 @@ export async function runDemoUpstream(fetcher: typeof fetch = fetch) {
     method: "POST",
     headers: { "X-SenseEngine-Service-Key": serviceKey },
     cache: "no-store",
+    redirect: "error",
     signal: AbortSignal.timeout(20_000),
   });
-  if (!response.ok) throw new DemoUpstreamError();
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new DemoUpstreamError();
+  }
 
   return demoRunSchema.parse(await response.json());
 }

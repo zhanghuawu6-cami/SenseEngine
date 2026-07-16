@@ -122,6 +122,23 @@ describe("DemoRateLimiter", () => {
     expect(limiter.acquire().ok).toBe(true);
   });
 
+  it("starts a fresh window when the injected clock moves backward", () => {
+    let now = 10_000;
+    const limiter = createLimiter(() => now, { limit: 1 });
+    const first = limiter.acquire();
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error("expected first lease");
+    first.release();
+
+    now = 0;
+    const afterRollback = limiter.acquire();
+
+    if (!afterRollback.ok) {
+      expect(afterRollback.retryAfterSeconds).toBeLessThanOrEqual(60);
+    }
+    expect(afterRollback.ok).toBe(true);
+  });
+
   it("keeps active leases counted when a new fixed window begins", () => {
     let now = 0;
     const limiter = createLimiter(() => now, { limit: 2, concurrency: 2 });

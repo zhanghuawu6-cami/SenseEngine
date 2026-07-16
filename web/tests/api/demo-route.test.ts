@@ -138,6 +138,7 @@ describe("SenseEngine demo proxy", () => {
       method: "POST",
       headers: { "X-SenseEngine-Service-Key": serviceKey },
       cache: "no-store",
+      redirect: "error",
       signal: timeoutSignal,
     });
     expect(Object.prototype.hasOwnProperty.call(init, "body")).toBe(false);
@@ -164,6 +165,7 @@ describe("SenseEngine demo proxy", () => {
       JSON.stringify({ privateUrl, serviceKey, requestBody }),
       { status: 502 },
     );
+    const cancel = vi.spyOn(upstreamResponse.body!, "cancel");
     const readers = [
       vi.spyOn(upstreamResponse, "json"),
       vi.spyOn(upstreamResponse, "text"),
@@ -177,7 +179,47 @@ describe("SenseEngine demo proxy", () => {
 
     await expectUnavailable(response, release);
     for (const reader of readers) expect(reader).not.toHaveBeenCalled();
-    expect(upstreamResponse.bodyUsed).toBe(false);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(
+      release.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("still returns the generic 503 and releases when body cancellation fails", async () => {
+    const upstreamResponse = new Response("upstream error", { status: 500 });
+    const cancel = vi.spyOn(upstreamResponse.body!, "cancel").mockRejectedValue(
+      new Error(`cancel failed ${privateUrl} ${serviceKey}`),
+    );
+    fetchMock.mockResolvedValue(upstreamResponse);
+
+    const response = await POST(trackedDemoRequest().request);
+
+    await expectUnavailable(response, release);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(
+      release.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not follow or expose an upstream redirect", async () => {
+    const location = `${privateUrl}redirect?key=${serviceKey}&body=${requestBody}`;
+    const upstreamResponse = new Response("redirect response", {
+      status: 302,
+      headers: { Location: location },
+    });
+    const readers = [
+      vi.spyOn(upstreamResponse, "json"),
+      vi.spyOn(upstreamResponse, "text"),
+      vi.spyOn(upstreamResponse, "arrayBuffer"),
+      vi.spyOn(upstreamResponse, "formData"),
+      vi.spyOn(upstreamResponse, "blob"),
+    ];
+    fetchMock.mockResolvedValue(upstreamResponse);
+
+    const response = await POST(trackedDemoRequest().request);
+
+    await expectUnavailable(response, release);
+    for (const reader of readers) expect(reader).not.toHaveBeenCalled();
   });
 
   it("maps invalid upstream JSON to the generic 503", async () => {

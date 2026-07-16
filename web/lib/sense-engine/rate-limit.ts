@@ -31,7 +31,11 @@ export class DemoRateLimiter {
 
   acquire(): DemoRateLimitLease {
     const now = this.now();
-    if (this.windowStartedAt === null || now - this.windowStartedAt >= this.windowMs) {
+    if (
+      this.windowStartedAt === null
+      || now < this.windowStartedAt
+      || now - this.windowStartedAt >= this.windowMs
+    ) {
       this.windowStartedAt = now;
       this.accepted = 0;
     }
