@@ -66,7 +66,7 @@ def test_api_is_a_private_docker_service_without_persistent_storage() -> None:
     assert api["runtime"] == "docker"
     assert api["dockerfilePath"] == "./Dockerfile.api"
     assert api["dockerContext"] == "."
-    assert api["healthCheckPath"] == "/health/ready"
+    assert "healthCheckPath" not in api
     assert "disk" not in api
 
     env_vars = _keyed_env_vars(api)

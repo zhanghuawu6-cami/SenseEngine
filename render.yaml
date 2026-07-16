@@ -11,7 +11,6 @@ services:
     region: singapore
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
-    healthCheckPath: /health/ready
     autoDeployTrigger: "off"
     envVars:
       - fromGroup: senseorder-shared-secrets
