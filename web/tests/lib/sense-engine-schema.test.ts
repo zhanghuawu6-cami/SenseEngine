@@ -12,6 +12,34 @@ const fixture: unknown = JSON.parse(
 
 type JsonObject = Record<string, unknown>;
 
+type EstimateMetricContainer = "dimensions" | "distribution";
+
+const requiredEstimateMetrics = [
+  ["dimensions", "cognitive_load"],
+  ["distribution", "flow"],
+  ["distribution", "friction"],
+  ["distribution", "cognitive_overload"],
+  ["distribution", "unknown"],
+] as const satisfies readonly (readonly [EstimateMetricContainer, string])[];
+
+const requiredEstimateMetricCases = [0, 1, 2].flatMap((stepIndex) =>
+  requiredEstimateMetrics.map(
+    ([container, key]) => [stepIndex, container, key] as const,
+  ),
+);
+
+const invalidProbabilities = [
+  Number.NaN,
+  Number.POSITIVE_INFINITY,
+  Number.NEGATIVE_INFINITY,
+  -0.01,
+  1.01,
+] as const;
+
+const invalidEstimateMetricCases = requiredEstimateMetrics.flatMap(([container, key]) =>
+  invalidProbabilities.map((probability) => [container, key, probability] as const),
+);
+
 function mutateFixture(mutator: (candidate: JsonObject) => void): unknown {
   const candidate = structuredClone(fixture) as JsonObject;
   mutator(candidate);
@@ -44,6 +72,23 @@ describe("demoRunSchema", () => {
 
   it("parses the complete generated demo fixture without dropping nested data", () => {
     const parsed = demoRunSchema.parse(fixture);
+
+    expectTypeOf(parsed.steps[0].estimate.dimensions).toMatchTypeOf<{
+      cognitive_load: number;
+    }>();
+    expectTypeOf(parsed.steps[0].estimate.distribution).toMatchTypeOf<{
+      cognitive_overload: number;
+      flow: number;
+      friction: number;
+      unknown: number;
+    }>();
+    expectTypeOf(parsed.steps[0].estimate.dimensions.cognitive_load).toEqualTypeOf<number>();
+    expectTypeOf(parsed.steps[0].estimate.distribution.flow).toEqualTypeOf<number>();
+    expectTypeOf(parsed.steps[0].estimate.distribution.friction).toEqualTypeOf<number>();
+    expectTypeOf(
+      parsed.steps[0].estimate.distribution.cognitive_overload,
+    ).toEqualTypeOf<number>();
+    expectTypeOf(parsed.steps[0].estimate.distribution.unknown).toEqualTypeOf<number>();
 
     expect(parsed).toEqual(fixture);
     expect(parsed).toMatchObject({
@@ -146,12 +191,27 @@ describe("demoRunSchema", () => {
     expect(demoRunSchema.safeParse(candidate).success).toBe(false);
   });
 
-  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -0.01, 1.01])(
-    "rejects invalid probability %s",
-    (probability) => {
+  it.each(requiredEstimateMetricCases)(
+    "rejects step %i when required estimate metric %s.%s is renamed",
+    (stepIndex, container, key) => {
       const candidate = mutateFixture((value) => {
-        const distribution = estimateOf(stepsOf(value)[0]).distribution as JsonObject;
-        distribution.unknown = probability;
+        const estimate = estimateOf(stepsOf(value)[stepIndex]);
+        const metrics = estimate[container] as JsonObject;
+        metrics[`${key}_renamed`] = metrics[key];
+        delete metrics[key];
+      });
+
+      expect(demoRunSchema.safeParse(candidate).success).toBe(false);
+    },
+  );
+
+  it.each(invalidEstimateMetricCases)(
+    "rejects invalid required estimate metric %s.%s value %s",
+    (container, key, probability) => {
+      const candidate = mutateFixture((value) => {
+        const estimate = estimateOf(stepsOf(value)[0]);
+        const metrics = estimate[container] as JsonObject;
+        metrics[key] = probability;
       });
 
       expect(demoRunSchema.safeParse(candidate).success).toBe(false);

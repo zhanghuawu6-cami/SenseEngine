@@ -6,6 +6,21 @@ const finiteProbability = finiteNumber.min(0).max(1);
 const nonEmptyString = z.string().min(1);
 const nonEmptyKey = z.string().min(1);
 
+const dimensionsSchema = z
+  .object({
+    cognitive_load: finiteProbability,
+  })
+  .catchall(finiteNumber);
+
+const distributionSchema = z
+  .object({
+    cognitive_overload: finiteProbability,
+    flow: finiteProbability,
+    friction: finiteProbability,
+    unknown: finiteProbability,
+  })
+  .catchall(finiteProbability);
+
 type FiniteJsonValue = DemoStep["intervention"]["action"]["parameters"][string];
 
 const finiteJsonValue: z.ZodType<FiniteJsonValue> = z.lazy(() =>
@@ -21,10 +36,8 @@ const finiteJsonValue: z.ZodType<FiniteJsonValue> = z.lazy(() =>
 
 const estimateSchema = z.strictObject({
   confidence: finiteProbability,
-  dimensions: z.record(nonEmptyKey, finiteNumber).refine((value) => Object.keys(value).length > 0),
-  distribution: z
-    .record(nonEmptyKey, finiteProbability)
-    .refine((value) => Object.keys(value).length > 0),
+  dimensions: dimensionsSchema,
+  distribution: distributionSchema,
   explanation: z.array(nonEmptyString).min(1),
   missingness: z.record(nonEmptyKey, finiteProbability),
   model_version: nonEmptyString,
@@ -79,7 +92,7 @@ function stepSchema<const TId extends string, const TSequence extends number>(
   });
 }
 
-export const demoRunSchema: z.ZodType<DemoRunResponse> = z.strictObject({
+export const demoRunSchema = z.strictObject({
   baseline_after: finiteProbability,
   generated_at: z.iso.datetime({ offset: true }),
   mode: z.literal("simulation"),
@@ -90,4 +103,4 @@ export const demoRunSchema: z.ZodType<DemoRunResponse> = z.strictObject({
     stepSchema("long-meeting", 2),
     stepSchema("deep-focus", 3),
   ]),
-});
+}) satisfies z.ZodType<DemoRunResponse>;
