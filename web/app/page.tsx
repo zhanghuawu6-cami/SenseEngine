@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowRight, ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import { BreathingField } from "@/components/BreathingField";
+import { StateLoopPreview } from "@/components/experience/StateLoopPreview";
 import { InsightCard } from "@/components/InsightCard";
 import { SectionHeading } from "@/components/SectionHeading";
 import { StateField } from "@/components/StateField";
@@ -38,14 +39,7 @@ export default function Home() {
               <Link href="/contact" className="button button--line">成为设计伙伴 <ArrowRight size={17} /></Link>
             </div>
           </div>
-          <div className="hero__readout" aria-label="状态计算维度示意">
-            <div className="readout-title"><span>STATE VECTOR</span><b>LIVE CONTEXT</b></div>
-            <div className="readout-axis"><span>认知负荷</span><i style={{ "--level": "74%" } as React.CSSProperties} /><b>0.74</b></div>
-            <div className="readout-axis"><span>疲劳 / 能量</span><i style={{ "--level": "46%" } as React.CSSProperties} /><b>0.46</b></div>
-            <div className="readout-axis"><span>唤醒度</span><i style={{ "--level": "61%" } as React.CSSProperties} /><b>0.61</b></div>
-            <div className="readout-axis"><span>社交可用性</span><i style={{ "--level": "29%" } as React.CSSProperties} /><b>0.29</b></div>
-            <p><span>CONFIDENCE</span><b>0.82</b><em>允许保持未知</em></p>
-          </div>
+          <StateLoopPreview />
         </div>
         <div className="hero__foot shell">
           <span>STATE COMPUTING / 2026</span>
