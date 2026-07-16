@@ -11,6 +11,7 @@ const links = [
   { href: "/products", label: "产品" },
   { href: "/insights", label: "洞察" },
   { href: "/about", label: "关于" },
+  { href: "/experience", label: "体验" },
 ];
 
 export function SiteHeader() {
@@ -50,7 +51,7 @@ export function SiteHeader() {
               {link.label}<span>0{links.indexOf(link) + 1}</span>
             </Link>
           ))}
-          <Link href="/contact" onClick={() => setOpen(false)}>建立合作<span>05</span></Link>
+          <Link href="/contact" onClick={() => setOpen(false)}>建立合作<span>06</span></Link>
         </nav>
       </div>
     </header>

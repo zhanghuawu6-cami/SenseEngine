@@ -23,6 +23,7 @@ export function SiteFooter({ settings }: { settings: SiteSettings }) {
             <Link href="/technology">技术体系</Link>
             <Link href="/products">产品架构</Link>
             <Link href="/insights">洞察与进展</Link>
+            <Link href="/experience">完整体验</Link>
           </div>
           <div>
             <span className="footer-label">COMPANY</span>
