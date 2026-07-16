@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots",
     "generate:api": "openapi-typescript ../contracts/sense-engine-openapi.json -o lib/generated/sense-engine-api.d.ts",
     "check:api": "npm run generate:api && git diff --exit-code -- lib/generated/sense-engine-api.d.ts"
   },
@@ -22,6 +24,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.55.0",
     "@tailwindcss/postcss": "4.3.2",
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/react": "16.3.0",
