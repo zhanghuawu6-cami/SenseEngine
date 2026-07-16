@@ -1,0 +1,16 @@
+node_modules
+.next
+.env*
+*.tsbuildinfo
+blob-report
+data/*.db*
+data/*.sqlite*
+docs
+e2e
+playwright.config.ts
+playwright-report
+public/uploads/*
+!public/uploads/.gitkeep
+test-results
+tests
+npm-debug.log*
