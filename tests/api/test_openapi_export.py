@@ -1,9 +1,11 @@
 """Tests for deterministic, publishable API contract exports."""
 
+import importlib
 import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -39,7 +41,16 @@ def run_export(script_name: str, *arguments: str | Path) -> subprocess.Completed
         capture_output=True,
         text=True,
         check=False,
+        timeout=30,
     )
+
+
+def load_export_main(script_name: str) -> Callable[[], int]:
+    """Load one script module for same-process fault injection."""
+    module = importlib.import_module(f"scripts.{Path(script_name).stem}")
+    main = module.main
+    assert callable(main)
+    return cast(Callable[[], int], main)
 
 
 def load_json(path: Path) -> object:
@@ -90,6 +101,55 @@ def test_export_rejects_wrong_argument_count_with_stable_usage(
     assert result.returncode == 2
     assert result.stdout == ""
     assert result.stderr == f"Usage: {script_name} OUTPUT\n"
+
+
+def test_openapi_usage_precedes_service_key_initialization() -> None:
+    environment = dict(os.environ)
+    environment.pop("SENSE_ENGINE_SERVICE_KEY", None)
+
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS_DIR / "export_openapi.py")],
+        cwd=REPO_ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == "Usage: export_openapi.py OUTPUT\n"
+
+
+@pytest.mark.parametrize(
+    "script_name",
+    ["export_openapi.py", "export_demo_fixture.py"],
+)
+def test_export_replace_failure_preserves_existing_output_and_removes_temp_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    script_name: str,
+) -> None:
+    monkeypatch.setenv("SENSE_ENGINE_SERVICE_KEY", "contract-test-key")
+    output = tmp_path / script_name / "contract.json"
+    output.parent.mkdir(parents=True)
+    existing = b"existing contract must survive\n"
+    output.write_bytes(existing)
+    main = load_export_main(script_name)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPTS_DIR / script_name), str(output)])
+
+    def fail_replace(source: object, destination: object) -> None:
+        del source, destination
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="^injected replace failure$"):
+        main()
+
+    assert output.read_bytes() == existing
+    assert {path.name for path in output.parent.iterdir()} == {output.name}
 
 
 @pytest.mark.parametrize(
