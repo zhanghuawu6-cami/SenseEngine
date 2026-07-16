@@ -1,16 +1,18 @@
 import fs from "node:fs/promises";
-import {
-  E2E_DATABASE_PATH,
-  E2E_MEDIA_ROOT,
-  E2E_TEST_ROOT,
-} from "./test-paths";
+import { buildE2EPaths, type E2EPaths } from "./test-paths";
 
-export async function cleanupE2EState(): Promise<void> {
+export { buildE2EPaths };
+
+export async function cleanupE2EState(paths: E2EPaths): Promise<void> {
   await Promise.all(
-    [E2E_DATABASE_PATH, `${E2E_DATABASE_PATH}-wal`, `${E2E_DATABASE_PATH}-shm`].map(
+    [paths.databasePath, `${paths.databasePath}-wal`, `${paths.databasePath}-shm`].map(
       (candidate) => fs.rm(candidate, { force: true }),
     ),
   );
-  await fs.rm(E2E_MEDIA_ROOT, { force: true, recursive: true });
-  await fs.mkdir(E2E_TEST_ROOT, { recursive: true });
+  await fs.rm(paths.mediaRoot, { force: true, recursive: true });
+  await fs.mkdir(paths.testRoot, { recursive: true });
+}
+
+export async function removeE2EState(paths: E2EPaths): Promise<void> {
+  await fs.rm(paths.testRoot, { force: true, recursive: true });
 }

@@ -1,8 +1,26 @@
-import os from "node:os";
 import path from "node:path";
 
-const testRoot = path.join(os.tmpdir(), "senseorder-playwright-w6");
+export type E2EPaths = {
+  databasePath: string;
+  mediaRoot: string;
+  testRoot: string;
+};
 
-export const E2E_DATABASE_PATH = path.join(testRoot, "senseorder-e2e.db");
-export const E2E_MEDIA_ROOT = path.join(testRoot, "media");
-export const E2E_TEST_ROOT = testRoot;
+export function buildE2EPaths(testRoot: string): E2EPaths {
+  if (!path.isAbsolute(testRoot)) {
+    throw new Error("SENSEORDER_E2E_ROOT must be an absolute path");
+  }
+  return {
+    databasePath: path.join(testRoot, "senseorder-e2e.db"),
+    mediaRoot: path.join(testRoot, "media"),
+    testRoot,
+  };
+}
+
+export function readE2EPaths(environment: NodeJS.ProcessEnv = process.env): E2EPaths {
+  const testRoot = environment.SENSEORDER_E2E_ROOT;
+  if (!testRoot) {
+    throw new Error("Run Playwright through npm run test:e2e to allocate isolated state");
+  }
+  return buildE2EPaths(testRoot);
+}

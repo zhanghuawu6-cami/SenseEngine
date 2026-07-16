@@ -17,6 +17,8 @@ const links = [
 export function SiteHeader() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const isCurrent = (href: string) =>
+    pathname === href || pathname.startsWith(`${href}/`);
 
   return (
     <header className="site-header">
@@ -26,12 +28,21 @@ export function SiteHeader() {
         </Link>
         <nav className="desktop-nav" aria-label="主要导航">
           {links.map((link) => (
-            <Link key={link.href} href={link.href} className={pathname.startsWith(link.href) ? "is-active" : ""}>
+            <Link
+              key={link.href}
+              href={link.href}
+              className={isCurrent(link.href) ? "is-active" : ""}
+              aria-current={isCurrent(link.href) ? "page" : undefined}
+            >
               {link.label}
             </Link>
           ))}
         </nav>
-        <Link href="/contact" className="header-contact">
+        <Link
+          href="/contact"
+          className="header-contact"
+          aria-current={isCurrent("/contact") ? "page" : undefined}
+        >
           建立合作 <ArrowUpRight size={15} strokeWidth={1.8} />
         </Link>
         <button
@@ -47,11 +58,22 @@ export function SiteHeader() {
       <div className={`mobile-nav ${open ? "is-open" : ""}`}>
         <nav aria-label="移动端导航">
           {links.map((link) => (
-            <Link key={link.href} href={link.href} onClick={() => setOpen(false)}>
+            <Link
+              key={link.href}
+              href={link.href}
+              aria-current={isCurrent(link.href) ? "page" : undefined}
+              onClick={() => setOpen(false)}
+            >
               {link.label}<span>0{links.indexOf(link) + 1}</span>
             </Link>
           ))}
-          <Link href="/contact" onClick={() => setOpen(false)}>建立合作<span>06</span></Link>
+          <Link
+            href="/contact"
+            aria-current={isCurrent("/contact") ? "page" : undefined}
+            onClick={() => setOpen(false)}
+          >
+            建立合作<span>06</span>
+          </Link>
         </nav>
       </div>
     </header>

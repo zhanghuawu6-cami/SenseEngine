@@ -543,7 +543,9 @@ git commit -m "feat: add responsive State Loop experience"
 
 - [ ] **Step 1: 安装并配置 Playwright**
 
-Run: `npm --prefix web install --save-dev @playwright/test@1.55.0`
+Run: `npm --prefix web install --save-dev --save-exact @playwright/test@1.55.1`
+
+`1.55.1` 修复了 Playwright 浏览器下载证书验证安全问题，因此不得回退到 `1.55.0`。
 
 在 `web/package.json` 加入：
 

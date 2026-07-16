@@ -31,7 +31,9 @@ test("shows unavailable without rendering interactive result actions on 503", as
   page,
 }) => {
   const browserErrors = collectBrowserErrors(page);
+  const intercepted503Urls: string[] = [];
   await page.route("**/api/demo/run", async (route) => {
+    intercepted503Urls.push(route.request().url());
     await route.fulfill({
       body: JSON.stringify({
         error: { code: "demo_unavailable", message: "temporarily unavailable" },
@@ -49,6 +51,9 @@ test("shows unavailable without rendering interactive result actions on 503", as
   for (const action of ["Ask", "Suggest Break", "Silence"]) {
     await expect(runner.getByText(action, { exact: true })).toHaveCount(0);
   }
+  expect(intercepted503Urls.map((url) => new URL(url).pathname)).toEqual(["/api/demo/run"]);
 
-  browserErrors.assertNone([/Failed to load resource.*503/]);
+  browserErrors.assertNone([
+    { message: /Failed to load resource.*503/, url: /\/api\/demo\/run$/ },
+  ]);
 });

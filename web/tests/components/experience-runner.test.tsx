@@ -229,8 +229,18 @@ describe("experience page wiring", () => {
       "href",
       "/experience",
     );
+    expect(within(desktopNav).getByRole("link", { name: "体验" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(desktopNav).getByRole("link", { name: "技术" }))
+      .not.toHaveAttribute("aria-current");
     const mobileNav = screen.getByRole("navigation", { name: "移动端导航" });
     expect(within(mobileNav).getByRole("link", { name: /体验/ })).toHaveTextContent("05");
+    expect(within(mobileNav).getByRole("link", { name: /体验/ })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     expect(within(mobileNav).getByRole("link", { name: /建立合作/ })).toHaveTextContent("06");
 
     rerender(

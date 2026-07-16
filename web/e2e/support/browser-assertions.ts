@@ -1,23 +1,47 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 type BrowserErrors = {
-  assertNone: (allowedPatterns?: readonly RegExp[]) => void;
+  assertNone: (allowed?: readonly AllowedBrowserError[]) => void;
+};
+
+type AllowedBrowserError = {
+  message: RegExp;
+  url: RegExp;
+};
+
+type BrowserError = {
+  message: string;
+  source: "console" | "pageerror";
+  url: string;
 };
 
 export function collectBrowserErrors(page: Page): BrowserErrors {
-  const errors: string[] = [];
+  const errors: BrowserError[] = [];
 
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(`console: ${message.text()}`);
+    if (message.type() === "error") {
+      errors.push({
+        message: message.text(),
+        source: "console",
+        url: message.location().url,
+      });
+    }
   });
-  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+  page.on("pageerror", (error) => {
+    errors.push({ message: error.message, source: "pageerror", url: page.url() });
+  });
 
   return {
-    assertNone(allowedPatterns = []) {
+    assertNone(allowed = []) {
       const unexpected = errors.filter(
-        (message) => !allowedPatterns.some((pattern) => pattern.test(message)),
+        (error) => !allowed.some(
+          (candidate) => candidate.message.test(error.message) && candidate.url.test(error.url),
+        ),
       );
-      expect(unexpected, `unexpected browser errors:\n${unexpected.join("\n")}`).toEqual([]);
+      expect(
+        unexpected,
+        `unexpected browser errors:\n${JSON.stringify(unexpected, null, 2)}`,
+      ).toEqual([]);
     },
   };
 }
