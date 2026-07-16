@@ -1,0 +1,53 @@
+envVarGroups:
+  - name: senseorder-shared-secrets
+    envVars:
+      - key: SENSE_ENGINE_SERVICE_KEY
+        generateValue: true
+
+services:
+  - type: pserv
+    name: senseengine-api
+    runtime: docker
+    region: singapore
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /health/ready
+    autoDeployTrigger: "off"
+    envVars:
+      - fromGroup: senseorder-shared-secrets
+      - key: SENSE_ENGINE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+
+  - type: web
+    name: senseorder-web
+    runtime: docker
+    region: singapore
+    dockerfilePath: ./web/Dockerfile
+    dockerContext: ./web
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    numInstances: 1
+    disk:
+      name: senseorder-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - fromGroup: senseorder-shared-secrets
+      - key: DATABASE_PATH
+        value: /var/data/senseorder.db
+      - key: MEDIA_ROOT
+        value: /var/data/media
+      - key: SENSE_ENGINE_PRIVATE_URL
+        value: http://senseengine-api:8000
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true

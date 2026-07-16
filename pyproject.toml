@@ -18,8 +18,10 @@ dependencies = [
 dev = [
     "httpx2>=2,<3",
     "mypy>=1.16,<2",
+    "pyyaml>=6.0.2,<7",
     "pytest>=8.4,<9",
     "ruff>=0.12,<1",
+    "types-PyYAML>=6.0.12.20250516",
 ]
 
 [tool.hatch.build.targets.wheel]
