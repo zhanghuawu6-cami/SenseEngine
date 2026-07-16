@@ -1,0 +1,190 @@
+{
+  "baseline_after": 0.65,
+  "generated_at": "2026-07-15T08:00:00Z",
+  "mode": "simulation",
+  "retention": "none",
+  "schema_version": "1.0",
+  "steps": [
+    {
+      "baseline_before": 0.5,
+      "estimate": {
+        "confidence": 0.4,
+        "dimensions": {
+          "cognitive_load": 0.5
+        },
+        "distribution": {
+          "cognitive_overload": 0.2,
+          "flow": 0.2,
+          "friction": 0.2,
+          "unknown": 0.3999999999999999
+        },
+        "explanation": [
+          "Available evidence does not strongly support a specific state."
+        ],
+        "missingness": {
+          "calendar_context": 1.0,
+          "computer_activity": 1.0
+        },
+        "model_version": "state-estimator-rules-v0.1"
+      },
+      "intervention": {
+        "action": {
+          "channel": "user-prompt",
+          "parameters": {},
+          "type": "Ask"
+        },
+        "expected_effect": {
+          "cognitive_load": 0.0
+        },
+        "objective": "confirm-current-state",
+        "reversibility": {
+          "is_reversible": true,
+          "method": "dismiss-prompt",
+          "recovery_seconds": 0.0
+        },
+        "risk": {
+          "level": "low",
+          "rationale": "系统不确定当前状态，需要用户确认"
+        }
+      },
+      "scenario": {
+        "description": "可用证据不足，系统应保留不确定性。",
+        "evidence": [
+          {
+            "label": "电脑活动",
+            "value": "未提供"
+          },
+          {
+            "label": "日历上下文",
+            "value": "未提供"
+          }
+        ],
+        "id": "insufficient-evidence",
+        "sequence": 1,
+        "title": "证据不足"
+      }
+    },
+    {
+      "baseline_before": 0.5,
+      "estimate": {
+        "confidence": 0.8,
+        "dimensions": {
+          "cognitive_load": 0.9
+        },
+        "distribution": {
+          "cognitive_overload": 0.8,
+          "flow": 0.05,
+          "friction": 0.05,
+          "unknown": 0.09999999999999998
+        },
+        "explanation": [
+          "Meeting duration of 90 minutes exceeds the 60-minute baseline."
+        ],
+        "missingness": {
+          "calendar_context": 0.0,
+          "computer_activity": 0.0
+        },
+        "model_version": "state-estimator-rules-v0.1"
+      },
+      "intervention": {
+        "action": {
+          "channel": "recommendation",
+          "parameters": {},
+          "type": "Suggest Break"
+        },
+        "expected_effect": {
+          "cognitive_load": -0.2
+        },
+        "objective": "reduce-cognitive-load",
+        "reversibility": {
+          "is_reversible": true,
+          "method": "dismiss-suggestion",
+          "recovery_seconds": 0.0
+        },
+        "risk": {
+          "level": "low",
+          "rationale": "认知负荷显著高于个人基线，建议休息"
+        }
+      },
+      "scenario": {
+        "description": "会议已持续 90 分钟，系统应识别持续占用带来的负荷。",
+        "evidence": [
+          {
+            "label": "电脑活动",
+            "value": "中等打字速度、中等鼠标移动频率"
+          },
+          {
+            "label": "活动上下文",
+            "value": "会议"
+          },
+          {
+            "label": "日历上下文",
+            "value": "忙碌 90 分钟"
+          }
+        ],
+        "id": "long-meeting",
+        "sequence": 2,
+        "title": "长时间会议"
+      }
+    },
+    {
+      "baseline_before": 0.7,
+      "estimate": {
+        "confidence": 0.85,
+        "dimensions": {
+          "cognitive_load": 0.55
+        },
+        "distribution": {
+          "cognitive_overload": 0.05,
+          "flow": 0.85,
+          "friction": 0.05,
+          "unknown": 0.050000000000000044
+        },
+        "explanation": [
+          "High typing speed combined with low mouse movement indicates deep focus."
+        ],
+        "missingness": {
+          "calendar_context": 1.0,
+          "computer_activity": 0.0
+        },
+        "model_version": "state-estimator-rules-v0.1"
+      },
+      "intervention": {
+        "action": {
+          "channel": "none",
+          "parameters": {},
+          "type": "Silence"
+        },
+        "expected_effect": {
+          "cognitive_load": 0.0
+        },
+        "objective": "preserve-focus",
+        "reversibility": {
+          "is_reversible": true,
+          "method": "no-action-required",
+          "recovery_seconds": 0.0
+        },
+        "risk": {
+          "level": "low",
+          "rationale": "状态良好，保持安静"
+        }
+      },
+      "scenario": {
+        "description": "高打字速度与低鼠标移动频率共同构成深度专注证据。",
+        "evidence": [
+          {
+            "label": "电脑活动",
+            "value": "高打字速度、低鼠标移动频率"
+          },
+          {
+            "label": "日历上下文",
+            "value": "未提供"
+          }
+        ],
+        "id": "deep-focus",
+        "sequence": 3,
+        "title": "深度专注"
+      }
+    }
+  ]
+}

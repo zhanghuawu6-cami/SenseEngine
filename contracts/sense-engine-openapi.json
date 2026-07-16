@@ -1,0 +1,581 @@
+{
+  "components": {
+    "schemas": {
+      "ActionSpec": {
+        "additionalProperties": false,
+        "description": "Describe an action without executing or dispatching it.",
+        "properties": {
+          "channel": {
+            "description": "拟议动作面向的交互或设备通道，用于 State Computing 表达交付位置，而非触发通道调用。",
+            "minLength": 1,
+            "title": "Channel",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FiniteJsonValue"
+            },
+            "description": "拟议动作的 JSON 参数对象，仅保存 State Computing 的声明数据，不包含执行或调度逻辑。",
+            "title": "Parameters",
+            "type": "object"
+          },
+          "type": {
+            "description": "拟议动作的语义类型，用于 State Computing 声明干预形式；构造该字段不会执行动作。",
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "channel",
+          "parameters"
+        ],
+        "title": "ActionSpec",
+        "type": "object"
+      },
+      "ApiError": {
+        "additionalProperties": false,
+        "description": "Describe one sanitized public API error.",
+        "properties": {
+          "code": {
+            "enum": [
+              "unauthorized",
+              "invalid_request",
+              "demo_unavailable"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ApiError",
+        "type": "object"
+      },
+      "DemoEvidence": {
+        "additionalProperties": false,
+        "description": "Represent one human-readable item of fixed demo evidence.",
+        "properties": {
+          "label": {
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "title": "DemoEvidence",
+        "type": "object"
+      },
+      "DemoRunResponse": {
+        "additionalProperties": false,
+        "description": "Return exactly one complete, ordered three-scenario simulation.",
+        "properties": {
+          "baseline_after": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Baseline After",
+            "type": "number"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "mode": {
+            "const": "simulation",
+            "default": "simulation",
+            "title": "Mode",
+            "type": "string"
+          },
+          "retention": {
+            "const": "none",
+            "default": "none",
+            "title": "Retention",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": "1.0",
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "steps": {
+            "maxItems": 3,
+            "minItems": 3,
+            "prefixItems": [
+              {
+                "$ref": "#/components/schemas/DemoStep"
+              },
+              {
+                "$ref": "#/components/schemas/DemoStep"
+              },
+              {
+                "$ref": "#/components/schemas/DemoStep"
+              }
+            ],
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema_version",
+          "mode",
+          "generated_at",
+          "retention",
+          "steps",
+          "baseline_after"
+        ],
+        "title": "DemoRunResponse",
+        "type": "object"
+      },
+      "DemoScenario": {
+        "additionalProperties": false,
+        "description": "Describe one scenario in the fixed public demo sequence.",
+        "properties": {
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/DemoEvidence"
+            },
+            "minItems": 1,
+            "title": "Evidence",
+            "type": "array"
+          },
+          "id": {
+            "enum": [
+              "insufficient-evidence",
+              "long-meeting",
+              "deep-focus"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "sequence": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "title": {
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "title",
+          "description",
+          "evidence"
+        ],
+        "title": "DemoScenario",
+        "type": "object"
+      },
+      "DemoStep": {
+        "additionalProperties": false,
+        "description": "Compose one scenario with its state estimate and intervention.",
+        "properties": {
+          "baseline_before": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Baseline Before",
+            "type": "number"
+          },
+          "estimate": {
+            "$ref": "#/components/schemas/StateEstimate"
+          },
+          "intervention": {
+            "$ref": "#/components/schemas/Intervention"
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/DemoScenario"
+          }
+        },
+        "required": [
+          "scenario",
+          "baseline_before",
+          "estimate",
+          "intervention"
+        ],
+        "title": "DemoStep",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "description": "Wrap one public API error response.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ApiError"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "FiniteJsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/FiniteJsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FiniteJsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "Intervention": {
+        "additionalProperties": false,
+        "description": "Represent a declarative intervention that never executes its action.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ActionSpec",
+            "description": "拟议动作的类型、通道与参数声明；State Computing 构造或读取本模型时绝不执行该动作。"
+          },
+          "expected_effect": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "各状态维度的有限预期变化值，表达 State Computing 的声明性效果假设，不预测或保证实际结果。",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Expected Effect",
+            "type": "object"
+          },
+          "objective": {
+            "description": "干预希望支持的非空目标，用于 State Computing 说明提议目的，不代表目标已实现。",
+            "minLength": 1,
+            "title": "Objective",
+            "type": "string"
+          },
+          "reversibility": {
+            "$ref": "#/components/schemas/Reversibility",
+            "description": "拟议动作的可逆性声明，供 State Computing 表达恢复条件；本模型不验证跨字段政策或执行恢复。"
+          },
+          "risk": {
+            "$ref": "#/components/schemas/RiskAssessment",
+            "description": "随干预提供的风险等级与依据，供 State Computing 展示和审计；本模型不包含风险计算或政策逻辑。"
+          }
+        },
+        "required": [
+          "objective",
+          "action",
+          "risk",
+          "reversibility",
+          "expected_effect"
+        ],
+        "title": "Intervention",
+        "type": "object"
+      },
+      "Reversibility": {
+        "additionalProperties": false,
+        "description": "Describe whether and how a proposed action can be reversed.",
+        "properties": {
+          "is_reversible": {
+            "description": "声明拟议动作是否可逆，供 State Computing 表达恢复属性；该布尔值本身不启动恢复。",
+            "title": "Is Reversible",
+            "type": "boolean"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选的恢复方法说明；为空表示未声明方法，State Computing 不据此推导或执行恢复步骤。",
+            "title": "Method"
+          },
+          "recovery_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选的有限非负恢复时长（秒）；零表示可立即恢复，仅作为 State Computing 的声明元数据。",
+            "title": "Recovery Seconds"
+          }
+        },
+        "required": [
+          "is_reversible"
+        ],
+        "title": "Reversibility",
+        "type": "object"
+      },
+      "RiskAssessment": {
+        "additionalProperties": false,
+        "description": "Store a supplied risk assessment without calculating risk.",
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/RiskLevel",
+            "description": "干预的已声明风险等级，供 State Computing 传递既有评估结果；本模型不计算或调整风险。"
+          },
+          "rationale": {
+            "description": "风险等级的非空依据说明，用于 State Computing 保留可解释性与审计信息，不执行政策判断。",
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "rationale"
+        ],
+        "title": "RiskAssessment",
+        "type": "object"
+      },
+      "RiskLevel": {
+        "description": "Supported declarative intervention risk levels.",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "RiskLevel",
+        "type": "string"
+      },
+      "StateEstimate": {
+        "additionalProperties": false,
+        "description": "Represent a v0.3 state result with uncertainty and evidence.",
+        "properties": {
+          "confidence": {
+            "description": "本次状态估计的总体可信度，反映结果整体可靠性，并与任一候选类别的概率明确区分。",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "dimensions": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "连续状态维度及其有限数值，例如认知负荷，用于表达 State Computing 的多维估计结果。",
+            "minProperties": 1,
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Dimensions",
+            "type": "object"
+          },
+          "distribution": {
+            "additionalProperties": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "description": "候选状态及其概率分布，保留不同状态之间的不确定性，不要求将候选概率强制归一化。",
+            "minProperties": 1,
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Distribution",
+            "type": "object"
+          },
+          "explanation": {
+            "description": "支持本次概率估计的人类可读主要证据与解释，用于建立用户信任并支持审计。",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Explanation",
+            "type": "array"
+          },
+          "missingness": {
+            "additionalProperties": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "description": "各类输入的缺失程度，用于解释因证据不完整而降级的状态估计及其可信度。",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Missingness",
+            "type": "object"
+          },
+          "model_version": {
+            "description": "生成该估计的模型或规则版本，用于复现、追溯并比较 State Computing 结果。",
+            "minLength": 1,
+            "title": "Model Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dimensions",
+          "distribution",
+          "confidence",
+          "missingness",
+          "model_version",
+          "explanation"
+        ],
+        "title": "StateEstimate",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "in": "header",
+        "name": "X-SenseEngine-Service-Key",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "SenseEngine API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health/live": {
+      "get": {
+        "description": "Report that the API process is running.",
+        "operationId": "health_live_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Live Health Live Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Live"
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "description": "Report that core service components can be constructed.",
+        "operationId": "health_ready_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Ready Health Ready Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Ready"
+      }
+    },
+    "/v1/demo/run": {
+      "post": {
+        "description": "Run the fixed demo for an authenticated bodyless request.",
+        "operationId": "demo_run_v1_demo_run_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Demo Run"
+      }
+    }
+  }
+}
