@@ -92,7 +92,12 @@ def test_web_container_uses_locked_build_and_minimal_standalone_runner() -> None
     assert "chown nextjs:nodejs /var/data" in runner
     assert "/app/.next/standalone ./" in runner
     assert "/app/.next/static ./.next/static" in runner
-    assert 'CMD ["node", "server.js"]' in runner
+    assert (
+        "COPY --from=builder --chown=nextjs:nodejs "
+        "/app/scripts/start-production.mjs ./scripts/start-production.mjs"
+    ) in runner
+    assert 'CMD ["node", "scripts/start-production.mjs"]' in runner
+    assert 'CMD ["node", "server.js"]' not in runner
     assert (
         "COPY --from=builder --chown=nextjs:nodejs "
         "/app/scripts/verify-restored-data.mjs ./scripts/verify-restored-data.mjs"
