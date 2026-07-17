@@ -1,0 +1,337 @@
+version: 2.1
+
+commands:
+  install-uv:
+    description: Install the pinned uv release without changing project files.
+    steps:
+      - run:
+          name: Install uv 0.8.6
+          command: |
+            curl -LsSf https://astral.sh/uv/0.8.6/install.sh | sh
+            printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+            source "$BASH_ENV"
+            uv --version
+
+  install-python-dependencies:
+    description: Restore the uv download cache and sync the locked environment.
+    steps:
+      - restore_cache:
+          keys:
+            - v1-uv-py312-{{ checksum "uv.lock" }}
+      - run:
+          name: Sync Python dependencies
+          command: uv sync --frozen --all-extras
+
+  save-python-cache:
+    description: Save only uv's reusable download cache.
+    steps:
+      - save_cache:
+          key: v1-uv-py312-{{ checksum "uv.lock" }}
+          paths:
+            - ~/.cache/uv
+
+  install-web-dependencies:
+    description: Restore npm downloads and perform a deterministic clean install.
+    steps:
+      - restore_cache:
+          keys:
+            - v1-npm-node22-{{ checksum "web/package-lock.json" }}
+      - run:
+          name: Install Web dependencies
+          command: npm --prefix web ci
+
+  save-web-cache:
+    description: Save only npm's reusable download cache.
+    steps:
+      - save_cache:
+          key: v1-npm-node22-{{ checksum "web/package-lock.json" }}
+          paths:
+            - ~/.npm
+
+jobs:
+  python-gate:
+    docker:
+      - image: cimg/python:3.12-node
+    steps:
+      - checkout
+      - install-uv
+      - install-python-dependencies
+      - save-python-cache
+      - run:
+          name: Run Python tests
+          command: uv run pytest
+      - run:
+          name: Check Python types
+          command: uv run mypy
+      - run:
+          name: Lint Python and repository files
+          command: uv run ruff check .
+
+  web-gate:
+    docker:
+      - image: cimg/node:22.14.0-browsers
+    steps:
+      - checkout
+      - install-web-dependencies
+      - save-web-cache
+      - run:
+          name: Run Web unit and component tests
+          command: npm --prefix web run test
+      - run:
+          name: Check Web types
+          command: npm --prefix web run typecheck
+      - run:
+          name: Lint Web application
+          command: npm --prefix web run lint
+      - run:
+          name: Build production Web application
+          command: |
+            DATABASE_PATH=/tmp/senseorder-web-gate.db \
+              NODE_ENV=production \
+              NEXT_TELEMETRY_DISABLED=1 \
+              npm --prefix web run build
+
+  contract-gate:
+    docker:
+      - image: cimg/python:3.12-node
+    steps:
+      - checkout
+      - install-uv
+      - install-python-dependencies
+      - install-web-dependencies
+      - run:
+          name: Regenerate API contracts and generated types
+          command: |
+            SENSE_ENGINE_ENV=contract-test \
+              SENSE_ENGINE_SERVICE_KEY=circleci-contract-test-key \
+              uv run python scripts/export_openapi.py contracts/sense-engine-openapi.json
+            uv run python scripts/export_demo_fixture.py contracts/demo-response.json
+            npm --prefix web run generate:api
+      - run:
+          name: Verify generated contracts are committed
+          command: |
+            git diff --exit-code -- \
+              contracts/sense-engine-openapi.json \
+              contracts/demo-response.json \
+              web/lib/generated/sense-engine-api.d.ts
+
+  integration-gate:
+    docker:
+      - image: cimg/python:3.12-node
+    steps:
+      - checkout
+      - install-uv
+      - install-python-dependencies
+      - install-web-dependencies
+      - run:
+          name: Run production dual-service integration smoke
+          command: |
+            set -euo pipefail
+
+            service_key='circleci-integration-test-key'
+            api_port=8000
+            web_port=3000
+            api_pid=''
+            web_pid=''
+            database_path=/tmp/senseorder-integration.db
+            media_root=/tmp/senseorder-integration-media
+
+            cleanup() {
+              if [[ -n "$web_pid" ]]; then
+                kill "$web_pid" 2>/dev/null || true
+                wait "$web_pid" 2>/dev/null || true
+              fi
+              if [[ -n "$api_pid" ]]; then
+                kill "$api_pid" 2>/dev/null || true
+                wait "$api_pid" 2>/dev/null || true
+              fi
+              rm -rf "$database_path" "$database_path-shm" "$database_path-wal" "$media_root"
+            }
+            trap cleanup EXIT
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+
+            export SENSE_ENGINE_ENV=test
+            export SENSE_ENGINE_SERVICE_KEY="$service_key"
+            uv run uvicorn sense_engine.api.app:app \
+              --host 127.0.0.1 \
+              --port "$api_port" \
+              --no-access-log &
+            api_pid=$!
+
+            export ADMIN_EMAIL='circleci-admin@senseorder.test'
+            export ADMIN_PASSWORD='circleci-admin-test-password'
+            export DATABASE_PATH="$database_path"
+            export MEDIA_ROOT="$media_root"
+            export NEXT_TELEMETRY_DISABLED=1
+            export NODE_ENV=production
+            export SESSION_SECRET='circleci-integration-session-secret'
+            export SENSE_ENGINE_PRIVATE_URL="http://127.0.0.1:$api_port"
+            npm --prefix web run build
+            (
+              cd web
+              PORT="$web_port" HOSTNAME=127.0.0.1 node .next/standalone/server.js
+            ) &
+            web_pid=$!
+
+            API_BASE_URL="http://127.0.0.1:$api_port" \
+              WEB_BASE_URL="http://127.0.0.1:$web_port" \
+              SENSE_ENGINE_PRIVATE_URL="http://127.0.0.1:$api_port" \
+              SENSE_ENGINE_SERVICE_KEY="$service_key" \
+              scripts/integration_smoke.sh
+
+  browser-gate:
+    docker:
+      - image: cimg/node:22.14.0-browsers
+    steps:
+      - checkout
+      - install-uv
+      - install-python-dependencies
+      - install-web-dependencies
+      - run:
+          name: Install the locked Playwright Chromium runtime
+          command: |
+            cd web
+            npx playwright install chromium
+      - run:
+          name: Run production browser tests
+          command: |
+            mkdir -p /tmp/playwright-junit
+            PLAYWRIGHT_HTML_OPEN=never \
+              PLAYWRIGHT_JUNIT_OUTPUT_FILE=/tmp/playwright-junit/results.xml \
+              npm --prefix web run test:e2e -- --reporter=line,junit,html
+      - store_test_results:
+          path: /tmp/playwright-junit
+      - store_artifacts:
+          path: web/test-results
+          destination: playwright-test-results
+      - store_artifacts:
+          path: web/playwright-report
+          destination: playwright-report
+
+  container-gate:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - setup_remote_docker:
+          docker_layer_caching: false
+      - run:
+          name: Build and smoke non-root containers on an isolated network
+          command: |
+            set -euo pipefail
+
+            suffix="${CIRCLE_WORKFLOW_ID:0:8}-${CIRCLE_NODE_INDEX}"
+            api_image='senseengine-api:ci'
+            web_image='senseorder-web:ci'
+            network="senseorder-ci-$suffix"
+            volume="senseorder-data-$suffix"
+            api_container="senseengine-api-$suffix"
+            web_container="senseorder-web-$suffix"
+
+            cleanup() {
+              docker rm --force "$web_container" "$api_container" >/dev/null 2>&1 || true
+              docker network rm "$network" >/dev/null 2>&1 || true
+              docker volume rm "$volume" >/dev/null 2>&1 || true
+            }
+            trap cleanup EXIT
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+
+            docker build -f Dockerfile.api -t "$api_image" .
+            docker build -f web/Dockerfile -t "$web_image" web
+            [[ "$(docker image inspect "$api_image" --format '{{.Config.User}}')" == 'app' ]]
+            [[ "$(docker image inspect "$web_image" --format '{{.Config.User}}')" == 'nextjs' ]]
+
+            docker network create "$network"
+            docker volume create "$volume"
+            docker run --detach \
+              --name "$api_container" \
+              --network "$network" \
+              --network-alias senseengine-api \
+              --env SENSE_ENGINE_ENV=test \
+              --env SENSE_ENGINE_SERVICE_KEY=circleci-container-test-key \
+              "$api_image"
+
+            api_ready=0
+            for _ in $(seq 1 30); do
+              if docker exec "$api_container" python -c \
+                "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"; then
+                api_ready=1
+                break
+              fi
+              sleep 1
+            done
+            [[ "$api_ready" == 1 ]]
+
+            docker run --detach \
+              --name "$web_container" \
+              --network "$network" \
+              --mount "type=volume,source=$volume,target=/var/data" \
+              --env ADMIN_EMAIL=circleci-admin@senseorder.test \
+              --env ADMIN_PASSWORD=circleci-admin-test-password \
+              --env DATABASE_PATH=/var/data/senseorder.db \
+              --env MEDIA_ROOT=/var/data/media \
+              --env SENSE_ENGINE_PRIVATE_URL=http://senseengine-api:8000 \
+              --env SENSE_ENGINE_SERVICE_KEY=circleci-container-test-key \
+              --env SESSION_SECRET=circleci-container-session-secret \
+              "$web_image"
+
+            web_ready=0
+            for _ in $(seq 1 60); do
+              if docker exec "$web_container" node -e \
+                "fetch('http://127.0.0.1:3000/api/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"; then
+                web_ready=1
+                break
+              fi
+              sleep 1
+            done
+            [[ "$web_ready" == 1 ]]
+
+            docker exec "$web_container" node -e \
+              "fetch('http://127.0.0.1:3000/api/demo/run', {method: 'POST'}).then(async r => { const body = await r.json(); const actions = body.steps.map(step => step.intervention.action.type).join(','); if (!r.ok || actions !== 'Ask,Suggest Break,Silence') process.exit(1) }).catch(() => process.exit(1))"
+
+  deploy-render:
+    docker:
+      - image: cimg/python:3.12-node
+    steps:
+      - checkout
+      - install-uv
+      - install-python-dependencies
+      - run:
+          name: Release both Render services with smoke and rollback
+          command: uv run python scripts/render_release.py
+
+workflows:
+  verify-and-deploy:
+    jobs:
+      - python-gate
+      - web-gate
+      - contract-gate
+      - integration-gate:
+          requires:
+            - python-gate
+            - web-gate
+            - contract-gate
+      - browser-gate:
+          requires:
+            - integration-gate
+      - container-gate:
+          requires:
+            - python-gate
+            - web-gate
+      - deploy-render:
+          context: senseorder-production
+          serial-group: << pipeline.project.slug >>/senseorder-production
+          requires:
+            - python-gate
+            - web-gate
+            - contract-gate
+            - integration-gate
+            - browser-gate
+            - container-gate
+          filters:
+            branches:
+              only: main
+            tags:
+              ignore: /.*/
