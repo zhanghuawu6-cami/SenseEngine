@@ -77,14 +77,16 @@ export default defineConfig({
       url: `${apiOrigin}/health/live`,
     },
     {
-      command: `npm run build && npm run start -- --hostname 127.0.0.1 --port ${webPort}`,
+      command: `npm run build && npm run start`,
       cwd: __dirname,
       env: {
         ADMIN_EMAIL: "playwright-admin@senseorder.test",
         ADMIN_PASSWORD: "playwright-admin-password",
         DATABASE_PATH: paths.databasePath,
+        HOSTNAME: "127.0.0.1",
         MEDIA_ROOT: paths.mediaRoot,
         NEXT_TELEMETRY_DISABLED: "1",
+        PORT: String(webPort),
         SENSE_ENGINE_PRIVATE_URL: apiOrigin,
         SENSE_ENGINE_SERVICE_KEY: serviceKey,
         SESSION_SECRET: "playwright-session-secret",

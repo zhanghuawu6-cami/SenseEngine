@@ -74,8 +74,13 @@ MEDIA_ROOT=/tmp/senseorder-local-media \
 SENSE_ENGINE_PRIVATE_URL=http://127.0.0.1:8000 \
 SENSE_ENGINE_SERVICE_KEY=local-demo-test-key \
 NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000 \
+HOSTNAME=127.0.0.1 \
+PORT=3000 \
 npm --prefix web run start
 ```
+
+`npm run start` 使用 Next.js 的 standalone 输出：构建完成后，启动脚本会把当前 `public` 和
+`.next/static` 资源组装到 `.next/standalone`，再从该目录启动 `server.js`。
 
 ### 终端 3：双服务冒烟
 
