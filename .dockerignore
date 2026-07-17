@@ -6,6 +6,10 @@
 .ruff_cache
 .superpowers
 .env*
+.pypirc
+pip.conf
+*.pem
+*.key
 *.db
 *.db-*
 *.sqlite

@@ -68,6 +68,10 @@ def test_api_build_context_excludes_non_runtime_and_sensitive_artifacts() -> Non
         "scripts",
         "tests",
         "web",
+        ".pypirc",
+        "pip.conf",
+        "*.pem",
+        "*.key",
     } <= rules
 
 
@@ -132,6 +136,10 @@ def test_web_build_context_excludes_local_state_secrets_and_generated_files() ->
         "public/uploads/*",
         "test-results",
         "tests",
+        ".npmrc",
+        ".yarnrc*",
+        "*.pem",
+        "*.key",
     } <= rules
     assert "!public/uploads/.gitkeep" in rules
 

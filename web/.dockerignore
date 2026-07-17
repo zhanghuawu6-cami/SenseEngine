@@ -1,6 +1,10 @@
 node_modules
 .next
 .env*
+.npmrc
+.yarnrc*
+*.pem
+*.key
 *.tsbuildinfo
 blob-report
 data/*.db*
