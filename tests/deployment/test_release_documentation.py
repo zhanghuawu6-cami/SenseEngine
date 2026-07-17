@@ -173,6 +173,43 @@ def test_readme_documents_circleci_gates_and_production_release_controls() -> No
         assert f"`{variable}`" in README
 
 
+def test_readme_requires_external_protection_for_the_production_context() -> None:
+    for requirement in (
+        "外部安全边界",
+        "Organization Settings",
+        "Project restrictions",
+        "`gh/zhanghuawu6-cami/SenseEngine`",
+        "Expression restrictions",
+        '`pipeline.git.branch == "main"`',
+        "job filter 本身不能保护 context",
+        "`All members`",
+        "feature branch",
+        "unauthorized",
+        "只读验证",
+        "main 正向验证",
+        "禁止生产部署",
+        "CircleCI token",
+        "不能证明平台状态",
+    ):
+        assert requirement in README
+
+    context_section = README.split("## CircleCI 门禁与发布", maxsplit=1)[1]
+    assert re.search(
+        r"senseorder-production[\s\S]{0,1200}Project restrictions"
+        r"[\s\S]{0,1200}Expression restrictions",
+        context_section,
+    )
+    assert re.search(
+        r"两项限制[\s\S]{0,300}正负验证[\s\S]{0,300}\*\*STOP\*\*"
+        r"[\s\S]{0,100}禁止生产部署",
+        context_section,
+    )
+    assert re.search(
+        r"feature branch[\s\S]{0,300}(?:context unauthorized|部署 job 不应获得 secret)",
+        context_section,
+    )
+
+
 def test_readme_documents_automatic_and_manual_rollback_without_credentials() -> None:
     for requirement in (
         "自动回滚",
