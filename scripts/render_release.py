@@ -466,10 +466,13 @@ def release() -> None:
 
 def main() -> int:
     """Run the release while keeping arbitrary upstream details off stderr."""
-    previous_handlers: dict[signal.Signals, SignalHandler] = {}
+    release_signals = (signal.SIGINT, signal.SIGTERM)
+    previous_handlers: dict[signal.Signals, SignalHandler] = {
+        signum: signal.getsignal(signum) for signum in release_signals
+    }
     try:
-        for signum in (signal.SIGINT, signal.SIGTERM):
-            previous_handlers[signum] = signal.signal(
+        for signum in release_signals:
+            signal.signal(
                 signum,
                 _raise_release_interrupted,
             )

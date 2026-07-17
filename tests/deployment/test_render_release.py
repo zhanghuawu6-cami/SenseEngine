@@ -7,7 +7,7 @@ import signal
 import sys
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from email.message import Message
 from pathlib import Path
 from types import FrameType, TracebackType
@@ -882,6 +882,52 @@ def test_first_signal_latches_both_signals_until_main_restores_handlers(
     assert previous_handler_calls == []
     assert signal.getsignal(signal.SIGINT) is previous_handler
     assert signal.getsignal(signal.SIGTERM) is previous_handler
+    captured = capsys.readouterr()
+    assert captured.err == "Render release failed (ReleaseInterrupted).\n"
+
+
+def test_main_restores_full_handler_snapshot_if_install_is_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+) -> None:
+    previous_handler_calls, previous_sigint_handler = benign_signal_handlers
+    real_signal = signal.signal
+    release_calls: list[str] = []
+
+    def previous_sigterm_handler(signum: int, frame: FrameType | None) -> None:
+        del signum, frame
+        previous_handler_calls.append(signal.SIGTERM)
+
+    real_signal(signal.SIGTERM, previous_sigterm_handler)
+
+    def interrupting_signal(
+        signum: int,
+        handler: Callable[[int, FrameType | None], object] | int | None,
+    ) -> object:
+        previous_handler = real_signal(signum, handler)
+        if (
+            signum == signal.SIGINT
+            and handler is render_release._raise_release_interrupted
+        ):
+            signal.raise_signal(signal.SIGINT)
+        return previous_handler
+
+    monkeypatch.setattr(render_release.signal, "signal", interrupting_signal)
+    monkeypatch.setattr(
+        render_release,
+        "release",
+        lambda: release_calls.append("release"),
+    )
+
+    assert render_release.main() == 1
+
+    assert release_calls == []
+    assert previous_handler_calls == []
+    assert (
+        signal.getsignal(signal.SIGINT),
+        signal.getsignal(signal.SIGTERM),
+    ) == (previous_sigint_handler, previous_sigterm_handler)
     captured = capsys.readouterr()
     assert captured.err == "Render release failed (ReleaseInterrupted).\n"
 
