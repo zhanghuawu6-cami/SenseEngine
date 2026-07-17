@@ -74,7 +74,11 @@ def test_api_is_a_private_docker_service_without_persistent_storage() -> None:
         "key": "SENSE_ENGINE_ENV",
         "value": "production",
     }
-    assert env_vars["LOG_LEVEL"] == {"key": "LOG_LEVEL", "value": "info"}
+    assert env_vars["UVICORN_LOG_LEVEL"] == {
+        "key": "UVICORN_LOG_LEVEL",
+        "value": "info",
+    }
+    assert "LOG_LEVEL" not in env_vars
 
 
 def test_web_is_a_single_instance_docker_service_with_the_only_disk() -> None:

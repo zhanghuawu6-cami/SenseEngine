@@ -449,7 +449,7 @@ FastAPI 使用以下环境变量：
 
 - `SENSE_ENGINE_SERVICE_KEY`
 - `SENSE_ENGINE_ENV=production`
-- `LOG_LEVEL=info`
+- `UVICORN_LOG_LEVEL=info`
 
 部署配置只声明变量名和生成策略，不提交真实值。
 

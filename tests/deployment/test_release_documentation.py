@@ -5,6 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
+INTEGRATION_DESIGN = (
+    ROOT / "docs/superpowers/specs/2026-07-15-senseorder-web-experience-integration-design.md"
+).read_text(encoding="utf-8")
 
 
 def _assert_environment_row(variable: str, classification: str) -> None:
@@ -53,7 +56,8 @@ def test_readme_classifies_every_runtime_and_release_variable() -> None:
         "SENSE_ENGINE_SERVICE_KEY",
         "SENSE_ENGINE_PRIVATE_URL",
         "SENSE_ENGINE_ENV",
-        "LOG_LEVEL",
+        "NODE_ENV",
+        "UVICORN_LOG_LEVEL",
         "DATABASE_PATH",
         "MEDIA_ROOT",
         "ADMIN_EMAIL",
@@ -74,6 +78,21 @@ def test_readme_classifies_every_runtime_and_release_variable() -> None:
 
     assert "`NEXT_PUBLIC_SITE_URL` 可公开" in README
     assert "SENSE_ENGINE_PRIVATE_URL` 和 `SENSE_ENGINE_SERVICE_KEY` 绝不得使用 `NEXT_PUBLIC_`" in README
+
+    assert not re.search(r"\|\s*`LOG_LEVEL`\s*\|", README)
+    assert "\nLOG_LEVEL=info \\" not in README
+    assert "UVICORN_LOG_LEVEL=info" in README
+
+
+def test_readme_sets_and_explains_node_env_for_local_production() -> None:
+    assert "NODE_ENV=production" in README
+    assert "Next.js 生产行为" in README
+    assert "Secure Cookie" in README
+
+
+def test_integration_design_uses_the_effective_uvicorn_log_variable() -> None:
+    assert "`UVICORN_LOG_LEVEL=info`" in INTEGRATION_DESIGN
+    assert "`LOG_LEVEL=info`" not in INTEGRATION_DESIGN
 
 
 def test_readme_documents_the_single_instance_render_consistency_boundary() -> None:

@@ -16,7 +16,7 @@ services:
       - fromGroup: senseorder-shared-secrets
       - key: SENSE_ENGINE_ENV
         value: production
-      - key: LOG_LEVEL
+      - key: UVICORN_LOG_LEVEL
         value: info
 
   - type: web
