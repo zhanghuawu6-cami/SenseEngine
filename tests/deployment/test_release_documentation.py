@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 INTEGRATION_DESIGN = (
@@ -14,6 +16,55 @@ def _assert_environment_row(variable: str, classification: str) -> None:
     pattern = rf"\|\s*`{re.escape(variable)}`\s*\|\s*{re.escape(classification)}\s*\|"
     assert re.search(pattern, README), (
         f"README must classify {variable} as {classification} in the environment table"
+    )
+
+
+def _assert_production_context_contract(readme: str) -> None:
+    for requirement in (
+        "外部安全边界",
+        "Organization Settings",
+        "Project restrictions",
+        "`gh/zhanghuawu6-cami/SenseEngine`",
+        "Expression restrictions",
+        '`pipeline.git.branch == "main"`',
+        "job filter 本身不能保护 context",
+        "`All members`",
+        "不能添加其他项目",
+        "删除该默认访问",
+        "不要打开、复制或记录",
+        "feature branch",
+        "unauthorized",
+        "只读验证",
+        "main 正向验证",
+        "授权通过",
+        "禁止生产部署",
+        "CircleCI token",
+        "不能证明平台状态",
+    ):
+        assert requirement in readme
+
+    for forbidden in (
+        "可以添加其他项目",
+        "保留该默认访问",
+        "可以打开、复制或记录",
+        "授权失败",
+    ):
+        assert forbidden not in readme
+
+    context_section = readme.split("## CircleCI 门禁与发布", maxsplit=1)[1]
+    assert re.search(
+        r"senseorder-production[\s\S]{0,1200}Project restrictions"
+        r"[\s\S]{0,1200}Expression restrictions",
+        context_section,
+    )
+    assert re.search(
+        r"两项限制[\s\S]{0,300}正负验证[\s\S]{0,300}\*\*STOP\*\*"
+        r"[\s\S]{0,100}禁止生产部署",
+        context_section,
+    )
+    assert re.search(
+        r"feature branch[\s\S]{0,300}(?:context unauthorized|部署 job 不应获得 secret)",
+        context_section,
     )
 
 
@@ -174,40 +225,28 @@ def test_readme_documents_circleci_gates_and_production_release_controls() -> No
 
 
 def test_readme_requires_external_protection_for_the_production_context() -> None:
-    for requirement in (
-        "外部安全边界",
-        "Organization Settings",
-        "Project restrictions",
-        "`gh/zhanghuawu6-cami/SenseEngine`",
-        "Expression restrictions",
-        '`pipeline.git.branch == "main"`',
-        "job filter 本身不能保护 context",
-        "`All members`",
-        "feature branch",
-        "unauthorized",
-        "只读验证",
-        "main 正向验证",
-        "禁止生产部署",
-        "CircleCI token",
-        "不能证明平台状态",
-    ):
-        assert requirement in README
+    _assert_production_context_contract(README)
 
-    context_section = README.split("## CircleCI 门禁与发布", maxsplit=1)[1]
-    assert re.search(
-        r"senseorder-production[\s\S]{0,1200}Project restrictions"
-        r"[\s\S]{0,1200}Expression restrictions",
-        context_section,
-    )
-    assert re.search(
-        r"两项限制[\s\S]{0,300}正负验证[\s\S]{0,300}\*\*STOP\*\*"
-        r"[\s\S]{0,100}禁止生产部署",
-        context_section,
-    )
-    assert re.search(
-        r"feature branch[\s\S]{0,300}(?:context unauthorized|部署 job 不应获得 secret)",
-        context_section,
-    )
+
+@pytest.mark.parametrize(
+    ("original", "replacement"),
+    (
+        ("删除该默认访问", "保留该默认访问"),
+        ("不要打开、复制或记录", "可以打开、复制或记录"),
+        ("授权通过", "授权失败"),
+        ("不能添加其他项目", "可以添加其他项目"),
+    ),
+)
+def test_production_context_contract_rejects_reversed_safety_semantics(
+    original: str,
+    replacement: str,
+) -> None:
+    assert original in README
+    mutated = README.replace(original, replacement, 1)
+    assert mutated != README
+
+    with pytest.raises(AssertionError):
+        _assert_production_context_contract(mutated)
 
 
 def test_readme_documents_automatic_and_manual_rollback_without_credentials() -> None:
