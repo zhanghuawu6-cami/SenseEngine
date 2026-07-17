@@ -298,7 +298,7 @@ def test_deploy_job_runs_release_controller_through_locked_environment() -> None
 
     assert "uv-x86_64-unknown-linux-gnu.tar.gz" in text
     assert "uv sync --frozen --all-extras" in text
-    assert "uv run python scripts/render_release.py" in text
+    assert 'CIRCLE_SHA1="$CIRCLE_SHA1" uv run python scripts/render_release.py' in text
 
 
 def test_uv_installer_uses_a_pinned_verified_artifact_without_remote_scripts() -> None:

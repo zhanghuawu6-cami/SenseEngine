@@ -330,7 +330,7 @@ jobs:
       - install-python-dependencies
       - run:
           name: Release both Render services with smoke and rollback
-          command: uv run python scripts/render_release.py
+          command: CIRCLE_SHA1="$CIRCLE_SHA1" uv run python scripts/render_release.py
 
 workflows:
   verify-and-deploy:

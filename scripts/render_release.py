@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -17,6 +18,7 @@ RENDER_API_BASE = "https://api.render.com"
 HTTP_TIMEOUT_SECONDS = 30
 POLL_INTERVAL_SECONDS = 10.0
 REQUIRED_ENVIRONMENT = (
+    "CIRCLE_SHA1",
     "RENDER_API_KEY",
     "RENDER_API_SERVICE_ID",
     "RENDER_WEB_SERVICE_ID",
@@ -142,6 +144,19 @@ def _deploy_status(payload: JsonValue) -> str | None:
     return None
 
 
+def _deploy_commit_id(payload: JsonValue) -> str | None:
+    deploy = _deploy_object(payload)
+    if deploy is None:
+        return None
+    commit = deploy.get("commit")
+    if not isinstance(commit, dict):
+        return None
+    commit_id = commit.get("id")
+    if isinstance(commit_id, str) and commit_id.strip():
+        return commit_id.strip().lower()
+    return None
+
+
 def _deploy_list(payload: JsonValue) -> list[JsonValue]:
     if isinstance(payload, list):
         return payload
@@ -167,12 +182,12 @@ def get_live_deploy(service_id: str) -> str:
     raise ReleaseError("Render service has no usable live deployment.")
 
 
-def start_deploy(service_id: str) -> str:
+def start_deploy(service_id: str, commit_id: str) -> str:
     """Start a Render deployment and return its ID."""
     payload = _render_request(
         "POST",
         f"/v1/services/{urllib.parse.quote(service_id, safe='')}/deploys",
-        {},
+        {"commitId": commit_id},
     )
     deploy_id = _deploy_id(payload)
     if deploy_id is None:
@@ -184,6 +199,8 @@ def wait_for_live(
     service_id: str,
     deploy_id: str,
     timeout_seconds: int = 900,
+    *,
+    expected_commit_id: str | None = None,
 ) -> None:
     """Wait until one deployment is live or reaches a failed terminal state."""
     if timeout_seconds <= 0:
@@ -212,6 +229,13 @@ def wait_for_live(
 
         status = _deploy_status(payload)
         if status == "live":
+            if (
+                expected_commit_id is not None
+                and _deploy_commit_id(payload) != expected_commit_id
+            ):
+                raise ReleaseError(
+                    "Render live deployment commit did not match the expected commit."
+                )
             return
         if status in FAILED_DEPLOY_STATUSES:
             raise ReleaseError("Render deployment reached a failed terminal status.")
@@ -344,10 +368,14 @@ def smoke_web(base_url: str) -> None:
 def _required_environment() -> dict[str, str]:
     values: dict[str, str] = {}
     for name in REQUIRED_ENVIRONMENT:
-        value = os.environ.get(name, "").strip()
-        if not value:
+        raw_value = os.environ.get(name, "")
+        if not raw_value.strip():
             raise ReleaseError(f"Missing required environment variable: {name}.")
-        values[name] = value
+        values[name] = raw_value if name == "CIRCLE_SHA1" else raw_value.strip()
+    commit_id = values["CIRCLE_SHA1"]
+    if re.fullmatch(r"[0-9a-fA-F]{40}", commit_id) is None:
+        raise ReleaseError("CIRCLE_SHA1 must be a 40-character hexadecimal commit ID.")
+    values["CIRCLE_SHA1"] = commit_id.lower()
     values["PRODUCTION_WEB_URL"] = _normalize_web_url(values["PRODUCTION_WEB_URL"])
     return values
 
@@ -362,6 +390,7 @@ def release() -> None:
     api_service_id = environment["RENDER_API_SERVICE_ID"]
     web_service_id = environment["RENDER_WEB_SERVICE_ID"]
     web_url = environment["PRODUCTION_WEB_URL"]
+    commit_id = environment["CIRCLE_SHA1"]
 
     _log("Recording current live deployments.")
     try:
@@ -373,13 +402,21 @@ def release() -> None:
     stage = "API deployment"
     try:
         _log("Starting API deployment.")
-        api_deploy = start_deploy(api_service_id)
-        wait_for_live(api_service_id, api_deploy)
+        api_deploy = start_deploy(api_service_id, commit_id)
+        wait_for_live(
+            api_service_id,
+            api_deploy,
+            expected_commit_id=commit_id,
+        )
 
         stage = "Web deployment"
         _log("Starting Web deployment.")
-        web_deploy = start_deploy(web_service_id)
-        wait_for_live(web_service_id, web_deploy)
+        web_deploy = start_deploy(web_service_id, commit_id)
+        wait_for_live(
+            web_service_id,
+            web_deploy,
+            expected_commit_id=commit_id,
+        )
 
         stage = "public smoke check"
         _log("Running public smoke checks.")

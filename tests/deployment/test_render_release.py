@@ -21,7 +21,10 @@ SERVICE_KEY = "senseengine-service-key-that-must-not-leak"
 API_SERVICE_ID = "srv-api-private-id"
 WEB_SERVICE_ID = "srv-web-public-id"
 WEB_URL = "https://senseorder.example"
+COMMIT_SHA = "ABCDEF0123456789ABCDEF0123456789ABCDEF01"
+NORMALIZED_COMMIT_SHA = COMMIT_SHA.lower()
 REQUIRED_ENV = {
+    "CIRCLE_SHA1": COMMIT_SHA,
     "RENDER_API_KEY": API_KEY,
     "RENDER_API_SERVICE_ID": API_SERVICE_ID,
     "RENDER_WEB_SERVICE_ID": WEB_SERVICE_ID,
@@ -170,7 +173,7 @@ def test_get_live_deploy_accepts_render_list_wrappers(
     ]
 
 
-def test_start_deploy_returns_direct_or_wrapped_deploy_id(
+def test_start_deploy_pins_commit_and_returns_direct_or_wrapped_deploy_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     responses: list[object] = [
@@ -185,18 +188,43 @@ def test_start_deploy_returns_direct_or_wrapped_deploy_id(
 
     monkeypatch.setattr(render_release, "_render_request", fake_request)
 
-    assert render_release.start_deploy(API_SERVICE_ID) == "dep-direct"
-    assert render_release.start_deploy(WEB_SERVICE_ID) == "dep-wrapper"
+    assert (
+        render_release.start_deploy(API_SERVICE_ID, NORMALIZED_COMMIT_SHA)
+        == "dep-direct"
+    )
+    assert (
+        render_release.start_deploy(WEB_SERVICE_ID, NORMALIZED_COMMIT_SHA)
+        == "dep-wrapper"
+    )
     assert calls == [
-        ("POST", f"/v1/services/{API_SERVICE_ID}/deploys", {}),
-        ("POST", f"/v1/services/{WEB_SERVICE_ID}/deploys", {}),
+        (
+            "POST",
+            f"/v1/services/{API_SERVICE_ID}/deploys",
+            {"commitId": NORMALIZED_COMMIT_SHA},
+        ),
+        (
+            "POST",
+            f"/v1/services/{WEB_SERVICE_ID}/deploys",
+            {"commitId": NORMALIZED_COMMIT_SHA},
+        ),
     ]
 
 
 def test_wait_for_live_returns_when_deploy_becomes_live(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    statuses = iter(["build_in_progress", "update_in_progress", "live"])
+    responses = iter(
+        [
+            {"deploy": {"status": "build_in_progress"}},
+            {"deploy": {"status": "update_in_progress"}},
+            {
+                "deploy": {
+                    "status": "live",
+                    "commit": {"id": NORMALIZED_COMMIT_SHA},
+                }
+            },
+        ]
+    )
     sleeps: list[float] = []
 
     def fake_request(
@@ -207,15 +235,46 @@ def test_wait_for_live_returns_when_deploy_becomes_live(
         timeout_seconds: float = 30,
     ) -> object:
         del method, path, body, timeout_seconds
-        return {"deploy": {"status": next(statuses)}}
+        return next(responses)
 
     monkeypatch.setattr(render_release, "_render_request", fake_request)
     monkeypatch.setattr(render_release, "_monotonic", lambda: 0.0)
     monkeypatch.setattr(render_release, "_sleep", sleeps.append)
 
-    render_release.wait_for_live(API_SERVICE_ID, "dep-new")
+    render_release.wait_for_live(
+        API_SERVICE_ID,
+        "dep-new",
+        expected_commit_id=NORMALIZED_COMMIT_SHA,
+    )
 
     assert sleeps == [10.0, 10.0]
+
+
+@pytest.mark.parametrize(
+    "live_payload",
+    [
+        {"deploy": {"status": "live"}},
+        {"deploy": {"status": "live", "commit": {}}},
+        {"deploy": {"status": "live", "commit": {"id": "f" * 40}}},
+    ],
+)
+def test_wait_for_live_rejects_missing_or_mismatched_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    live_payload: object,
+) -> None:
+    monkeypatch.setattr(
+        render_release,
+        "_render_request",
+        lambda method, path, body=None, *, timeout_seconds=30: live_payload,
+    )
+    monkeypatch.setattr(render_release, "_monotonic", lambda: 0.0)
+
+    with pytest.raises(render_release.ReleaseError, match="commit"):
+        render_release.wait_for_live(
+            API_SERVICE_ID,
+            "dep-new",
+            expected_commit_id=NORMALIZED_COMMIT_SHA,
+        )
 
 
 @pytest.mark.parametrize(
@@ -469,12 +528,20 @@ def test_release_records_old_deploys_and_orders_api_web_then_smoke(
         calls.append(("get", service_id))
         return f"old-{service_id}"
 
-    def fake_start(service_id: str) -> str:
-        calls.append(("start", service_id))
+    def fake_start(service_id: str, commit_id: str) -> str:
+        calls.append(("start", service_id, commit_id))
         return f"new-{service_id}"
 
-    def fake_wait(service_id: str, deploy_id: str, timeout_seconds: int = 900) -> None:
-        calls.append(("wait", service_id, deploy_id, timeout_seconds))
+    def fake_wait(
+        service_id: str,
+        deploy_id: str,
+        timeout_seconds: int = 900,
+        *,
+        expected_commit_id: str | None = None,
+    ) -> None:
+        calls.append(
+            ("wait", service_id, deploy_id, timeout_seconds, expected_commit_id)
+        )
 
     monkeypatch.setattr(render_release, "get_live_deploy", fake_get)
     monkeypatch.setattr(render_release, "start_deploy", fake_start)
@@ -490,10 +557,22 @@ def test_release_records_old_deploys_and_orders_api_web_then_smoke(
     assert calls == [
         ("get", API_SERVICE_ID),
         ("get", WEB_SERVICE_ID),
-        ("start", API_SERVICE_ID),
-        ("wait", API_SERVICE_ID, f"new-{API_SERVICE_ID}", 900),
-        ("start", WEB_SERVICE_ID),
-        ("wait", WEB_SERVICE_ID, f"new-{WEB_SERVICE_ID}", 900),
+        ("start", API_SERVICE_ID, NORMALIZED_COMMIT_SHA),
+        (
+            "wait",
+            API_SERVICE_ID,
+            f"new-{API_SERVICE_ID}",
+            900,
+            NORMALIZED_COMMIT_SHA,
+        ),
+        ("start", WEB_SERVICE_ID, NORMALIZED_COMMIT_SHA),
+        (
+            "wait",
+            WEB_SERVICE_ID,
+            f"new-{WEB_SERVICE_ID}",
+            900,
+            NORMALIZED_COMMIT_SHA,
+        ),
         ("smoke", WEB_URL),
     ]
 
@@ -517,14 +596,22 @@ def test_release_failure_always_rolls_back_web_then_api_and_checks_health(
         calls.append(("get", service_id))
         return "old-api" if service_id == API_SERVICE_ID else "old-web"
 
-    def fake_start(service_id: str) -> str:
+    def fake_start(service_id: str, commit_id: str) -> str:
+        assert commit_id == NORMALIZED_COMMIT_SHA
         stage = "api-start" if service_id == API_SERVICE_ID else "web-start"
         calls.append((stage, service_id))
         fail_if(stage)
         return "new-api" if service_id == API_SERVICE_ID else "new-web"
 
-    def fake_wait(service_id: str, deploy_id: str, timeout_seconds: int = 900) -> None:
+    def fake_wait(
+        service_id: str,
+        deploy_id: str,
+        timeout_seconds: int = 900,
+        *,
+        expected_commit_id: str | None = None,
+    ) -> None:
         del deploy_id, timeout_seconds
+        assert expected_commit_id == NORMALIZED_COMMIT_SHA
         stage = "api-wait" if service_id == API_SERVICE_ID else "web-wait"
         calls.append((stage, service_id))
         fail_if(stage)
@@ -576,7 +663,11 @@ def test_release_attempts_both_rollbacks_and_reports_rollback_health_failures(
         "get_live_deploy",
         lambda service_id: "old-api" if service_id == API_SERVICE_ID else "old-web",
     )
-    monkeypatch.setattr(render_release, "start_deploy", lambda service_id: "new")
+    monkeypatch.setattr(
+        render_release,
+        "start_deploy",
+        lambda service_id, commit_id: "new",
+    )
     monkeypatch.setattr(render_release, "wait_for_live", lambda *args: None)
     monkeypatch.setattr(
         render_release,
@@ -621,9 +712,42 @@ def test_release_rejects_each_missing_required_environment_variable(
 ) -> None:
     _set_required_environment(monkeypatch)
     monkeypatch.delenv(missing)
+    monkeypatch.setattr(
+        render_release,
+        "get_live_deploy",
+        lambda service_id: pytest.fail(f"Render called for {service_id}"),
+    )
 
     with pytest.raises(render_release.ReleaseError, match=missing):
         render_release.release()
+
+
+@pytest.mark.parametrize(
+    "invalid_sha",
+    [
+        "a" * 39,
+        "a" * 41,
+        "g" * 40,
+        f" {'a' * 40}",
+        "private-invalid-commit-value",
+    ],
+)
+def test_release_rejects_invalid_circle_sha_without_leaking_it(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_sha: str,
+) -> None:
+    _set_required_environment(monkeypatch)
+    monkeypatch.setenv("CIRCLE_SHA1", invalid_sha)
+    monkeypatch.setattr(
+        render_release,
+        "get_live_deploy",
+        lambda service_id: pytest.fail(f"Render called for {service_id}"),
+    )
+
+    with pytest.raises(render_release.ReleaseError, match="CIRCLE_SHA1") as captured:
+        render_release.release()
+
+    assert invalid_sha not in str(captured.value)
 
 
 @pytest.mark.parametrize("error_kind", ["http", "url"])
