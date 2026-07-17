@@ -278,6 +278,21 @@ def test_container_gate_builds_non_root_images_and_checks_isolated_health() -> N
     assert 'exit "$status"' in command
 
 
+def test_container_gate_runs_restore_verifier_in_the_final_non_root_web_image() -> None:
+    command = _run_commands(_jobs(_config())["container-gate"])
+
+    assert "web_image='senseorder-web:ci'" in command
+    assert "CREATE TABLE IF NOT EXISTS media" in command
+    assert "INSERT INTO media" in command
+    assert "writeFileSync" in command
+    assert "circleci-restore-fixture.png" in command
+    verifier = 'docker exec "$web_container" node scripts/verify-restored-data.mjs'
+    assert verifier in command
+    assert "--user root" not in command
+    assert command.index("/api/demo/run") < command.index("INSERT INTO media")
+    assert command.index("INSERT INTO media") < command.index(verifier)
+
+
 def test_deploy_job_runs_release_controller_through_locked_environment() -> None:
     text = _expanded_job_text(_config(), "deploy-render")
 
