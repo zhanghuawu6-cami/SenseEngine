@@ -58,6 +58,16 @@ class FakeResponse:
         return self.status
 
 
+class TrackableHTTPError(urllib.error.HTTPError):
+    def __init__(self) -> None:
+        super().__init__(WEB_URL, 503, "private response", Message(), io.BytesIO())
+        self.explicitly_closed = False
+
+    def close(self) -> None:
+        self.explicitly_closed = True
+        super().close()
+
+
 def _set_required_environment(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -89,6 +99,7 @@ def test_render_request_builds_authenticated_json_request(
         "POST",
         f"/v1/services/{WEB_SERVICE_ID}/rollback",
         {"deployId": "dep-old-web"},
+        timeout_seconds=7.0,
     )
 
     request = captured["request"]
@@ -102,7 +113,7 @@ def test_render_request_builds_authenticated_json_request(
     assert request.get_header("Content-type") == "application/json"
     assert isinstance(request.data, bytes)
     assert json.loads(request.data) == {"deployId": "dep-old-web"}
-    assert captured["timeout"] == 30
+    assert captured["timeout"] == 7.0
     assert result == {"deploy": {"id": "dep-rollback"}}
 
 
@@ -188,8 +199,14 @@ def test_wait_for_live_returns_when_deploy_becomes_live(
     statuses = iter(["build_in_progress", "update_in_progress", "live"])
     sleeps: list[float] = []
 
-    def fake_request(method: str, path: str, body: object | None = None) -> object:
-        del method, path, body
+    def fake_request(
+        method: str,
+        path: str,
+        body: object | None = None,
+        *,
+        timeout_seconds: float = 30,
+    ) -> object:
+        del method, path, body, timeout_seconds
         return {"deploy": {"status": next(statuses)}}
 
     monkeypatch.setattr(render_release, "_render_request", fake_request)
@@ -213,7 +230,7 @@ def test_wait_for_live_fails_immediately_for_terminal_status(
     monkeypatch.setattr(
         render_release,
         "_render_request",
-        lambda method, path, body=None: {"status": status},
+        lambda method, path, body=None, *, timeout_seconds=30: {"status": status},
     )
     monkeypatch.setattr(render_release, "_monotonic", lambda: 0.0)
     monkeypatch.setattr(render_release, "_sleep", sleeps.append)
@@ -237,7 +254,9 @@ def test_wait_for_live_enforces_monotonic_900_second_deadline(
     monkeypatch.setattr(
         render_release,
         "_render_request",
-        lambda method, path, body=None: {"status": "build_in_progress"},
+        lambda method, path, body=None, *, timeout_seconds=30: {
+            "status": "build_in_progress"
+        },
     )
     monkeypatch.setattr(render_release, "_monotonic", lambda: now[0])
     monkeypatch.setattr(render_release, "_sleep", fake_sleep)
@@ -247,6 +266,40 @@ def test_wait_for_live_enforces_monotonic_900_second_deadline(
 
     assert sum(sleeps) == 900
     assert set(sleeps) == {10.0}
+
+
+def test_wait_for_live_rejects_live_returned_after_the_900_second_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [0.0]
+    request_timeouts: list[float] = []
+
+    def fake_request(
+        method: str,
+        path: str,
+        body: object | None = None,
+        *,
+        timeout_seconds: float = 30,
+    ) -> object:
+        del method, path, body
+        request_timeouts.append(timeout_seconds)
+        if len(request_timeouts) == 1:
+            now[0] = 880.0
+            return {"status": "build_in_progress"}
+        now[0] = 901.0
+        return {"status": "live"}
+
+    def fake_sleep(seconds: float) -> None:
+        now[0] += seconds
+
+    monkeypatch.setattr(render_release, "_render_request", fake_request)
+    monkeypatch.setattr(render_release, "_monotonic", lambda: now[0])
+    monkeypatch.setattr(render_release, "_sleep", fake_sleep)
+
+    with pytest.raises(render_release.ReleaseError, match="900 seconds"):
+        render_release.wait_for_live(API_SERVICE_ID, "dep-crossed-deadline")
+
+    assert request_timeouts == [30.0, 10.0]
 
 
 def test_rollback_uses_old_id_and_waits_for_returned_deploy(
@@ -277,6 +330,29 @@ def test_rollback_uses_old_id_and_waits_for_returned_deploy(
         ),
         ("wait", WEB_SERVICE_ID, ("dep-rollback-new", 900)),
     ]
+
+
+@pytest.mark.parametrize("payload", [{}, {"deploy": {}}, {"id": "  "}])
+def test_rollback_fails_closed_without_a_new_deploy_id(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+) -> None:
+    waits: list[tuple[object, ...]] = []
+    monkeypatch.setattr(
+        render_release,
+        "_render_request",
+        lambda method, path, body=None: payload,
+    )
+    monkeypatch.setattr(
+        render_release,
+        "wait_for_live",
+        lambda *args: waits.append(args),
+    )
+
+    with pytest.raises(render_release.ReleaseError, match="rollback response"):
+        render_release.rollback(WEB_SERVICE_ID, "dep-old-web")
+
+    assert waits == []
 
 
 def test_smoke_web_uses_bodyless_public_requests_and_validates_demo(
@@ -339,6 +415,21 @@ def test_smoke_web_rejects_invalid_demo_without_printing_response(
 
     public_output = capsys.readouterr().out + capsys.readouterr().err
     assert "must-not-be-printed" not in public_output
+
+
+@pytest.mark.parametrize("payload", [{}, {"status": "starting"}, []])
+def test_web_health_requires_an_alive_status(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+) -> None:
+    monkeypatch.setattr(
+        render_release,
+        "_web_request",
+        lambda method, url: payload,
+    )
+
+    with pytest.raises(render_release.ReleaseError, match="health validation"):
+        render_release._check_web_health(WEB_URL)
 
 
 def test_release_records_old_deploys_and_orders_api_web_then_smoke(
@@ -540,6 +631,29 @@ def test_render_transport_errors_are_sanitized(
     assert API_KEY not in public_text
     assert API_SERVICE_ID not in public_text
     assert "body=" not in public_text
+
+
+@pytest.mark.parametrize("boundary", ["render", "web"])
+def test_http_errors_are_explicitly_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+) -> None:
+    monkeypatch.setenv("RENDER_API_KEY", API_KEY)
+    error = TrackableHTTPError()
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> FakeResponse:
+        del request, timeout
+        raise error
+
+    monkeypatch.setattr(render_release.urllib.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(render_release.ReleaseError):
+        if boundary == "render":
+            render_release._render_request("GET", "/v1/services/service/deploys")
+        else:
+            render_release._web_request("GET", f"{WEB_URL}/api/health")
+
+    assert error.explicitly_closed is True
 
 
 def test_main_returns_nonzero_and_prints_only_sanitized_summary(

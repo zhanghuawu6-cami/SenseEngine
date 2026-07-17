@@ -63,6 +63,8 @@ def _render_request(
     method: str,
     path: str,
     body: Mapping[str, JsonValue] | None = None,
+    *,
+    timeout_seconds: float = HTTP_TIMEOUT_SECONDS,
 ) -> JsonValue:
     """Call Render through one secret-safe HTTP boundary."""
     api_key = os.environ.get("RENDER_API_KEY", "").strip()
@@ -86,13 +88,15 @@ def _render_request(
     try:
         with urllib.request.urlopen(
             request,
-            timeout=HTTP_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         ) as response:
             status = response.getcode()
             content = response.read()
     except urllib.error.HTTPError as error:
+        status = error.code
+        error.close()
         raise ReleaseError(
-            f"Render API request failed with HTTP status {error.code}."
+            f"Render API request failed with HTTP status {status}."
         ) from error
     except (urllib.error.URLError, TimeoutError) as error:
         raise ReleaseError("Render API request failed during transport.") from error
@@ -191,17 +195,28 @@ def wait_for_live(
         f"{urllib.parse.quote(deploy_id, safe='')}"
     )
     while True:
-        status = _deploy_status(_render_request("GET", path))
+        remaining = deadline - _monotonic()
+        if remaining <= 0:
+            raise ReleaseError(
+                f"Render deployment did not become live within {timeout_seconds} seconds."
+            )
+        payload = _render_request(
+            "GET",
+            path,
+            timeout_seconds=min(HTTP_TIMEOUT_SECONDS, remaining),
+        )
+        if _monotonic() >= deadline:
+            raise ReleaseError(
+                f"Render deployment did not become live within {timeout_seconds} seconds."
+            )
+
+        status = _deploy_status(payload)
         if status == "live":
             return
         if status in FAILED_DEPLOY_STATUSES:
             raise ReleaseError("Render deployment reached a failed terminal status.")
 
         remaining = deadline - _monotonic()
-        if remaining <= 0:
-            raise ReleaseError(
-                f"Render deployment did not become live within {timeout_seconds} seconds."
-            )
         _sleep(min(POLL_INTERVAL_SECONDS, remaining))
 
 
@@ -213,8 +228,9 @@ def rollback(service_id: str, deploy_id: str) -> None:
         {"deployId": deploy_id},
     )
     rollback_deploy_id = _deploy_id(payload)
-    if rollback_deploy_id is not None:
-        wait_for_live(service_id, rollback_deploy_id)
+    if rollback_deploy_id is None:
+        raise ReleaseError("Render API returned an invalid rollback response.")
+    wait_for_live(service_id, rollback_deploy_id)
 
 
 def _normalize_web_url(raw_url: str) -> str:
@@ -250,8 +266,10 @@ def _web_request(method: str, url: str) -> JsonValue:
             status = response.getcode()
             content = response.read()
     except urllib.error.HTTPError as error:
+        status = error.code
+        error.close()
         raise ReleaseError(
-            f"Public smoke request failed with HTTP status {error.code}."
+            f"Public smoke request failed with HTTP status {status}."
         ) from error
     except (urllib.error.URLError, TimeoutError) as error:
         raise ReleaseError("Public smoke request failed during transport.") from error
@@ -307,7 +325,9 @@ def _validate_demo(payload: JsonValue) -> None:
 
 
 def _check_web_health(base_url: str) -> None:
-    _web_request("GET", f"{base_url}/api/health")
+    health = _as_object(_web_request("GET", f"{base_url}/api/health"))
+    if health is None or health.get("status") != "alive":
+        raise ReleaseError("Public health validation failed.")
 
 
 def smoke_web(base_url: str) -> None:
