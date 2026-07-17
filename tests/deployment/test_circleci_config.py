@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -168,7 +169,7 @@ def test_python_gate_uses_pinned_uv_locked_dependencies_and_full_checks() -> Non
     text = _expanded_job_text(config, "python-gate")
 
     assert image == "cimg/python:3.12-node"
-    assert "uv/0.8.6/install.sh" in text
+    assert "uv-x86_64-unknown-linux-gnu.tar.gz" in text
     assert "uv --version" in text
     assert "uv sync --frozen --all-extras" in text
     assert "uv run pytest" in text
@@ -216,11 +217,19 @@ def test_integration_gate_supervises_production_services_and_runs_real_smoke() -
     assert "trap 'exit 143' TERM" in command
     assert "uv run uvicorn sense_engine.api.app:app" in command
     assert "npm --prefix web run build" in command
-    assert "node .next/standalone/server.js" in command
+    assert "cp -R web/public web/.next/standalone/public" in command
+    assert "cp -R web/.next/static web/.next/standalone/.next/static" in command
+    assert "cd web/.next/standalone" in command
+    assert "node server.js" in command
     assert "scripts/integration_smoke.sh" in command
+    assert command.index("scripts/integration_smoke.sh") < command.index("/_next/static/")
+    assert "fetch(assetUrl)" in command
+    assert "if (!assetResponse.ok) process.exit(1)" in command
     assert "circleci-integration-test-key" in command
     assert "set -x" not in command
     assert "echo" not in command
+    assert "console.log" not in command
+    assert "console.error" not in command
 
 
 def test_browser_gate_installs_chromium_runs_e2e_and_preserves_diagnostics() -> None:
@@ -261,14 +270,37 @@ def test_container_gate_builds_non_root_images_and_checks_isolated_health() -> N
     assert "trap cleanup EXIT" in command
     assert "trap 'exit 130' INT" in command
     assert "trap 'exit 143' TERM" in command
+    assert "status=$?" in command
+    assert '[[ "$status" -ne 0 ]]' in command
+    assert 'docker logs --tail 200 "$api_container" >&2 || true' in command
+    assert 'docker logs --tail 200 "$web_container" >&2 || true' in command
+    assert command.index("docker logs --tail 200") < command.index("docker rm --force")
+    assert 'exit "$status"' in command
 
 
 def test_deploy_job_runs_release_controller_through_locked_environment() -> None:
     text = _expanded_job_text(_config(), "deploy-render")
 
-    assert "uv/0.8.6/install.sh" in text
+    assert "uv-x86_64-unknown-linux-gnu.tar.gz" in text
     assert "uv sync --frozen --all-extras" in text
     assert "uv run python scripts/render_release.py" in text
+
+
+def test_uv_installer_uses_a_pinned_verified_artifact_without_remote_scripts() -> None:
+    command = _run_commands(_commands(_config())["install-uv"])
+
+    assert re.search(r"\|\s*(?:sh|bash)(?:\s|$)", command) is None
+    assert (
+        "https://github.com/astral-sh/uv/releases/download/0.8.6/"
+        "uv-x86_64-unknown-linux-gnu.tar.gz"
+    ) in command
+    assert "5429c9b96cab65198c2e5bfe83e933329aa16303a0369d5beedc71785a4a2f36" in command
+    assert "/tmp/uv-x86_64-unknown-linux-gnu.tar.gz" in command
+    assert "sha256sum --check" in command
+    assert "tar -xzf" in command
+    assert 'install -m 755' in command
+    assert '"$HOME/.local/bin/uv"' in command
+    assert "uv --version" in command
 
 
 def test_dependency_caches_are_lockfile_keyed_and_exclude_runtime_state() -> None:
