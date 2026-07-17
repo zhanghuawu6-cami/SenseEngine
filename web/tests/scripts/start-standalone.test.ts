@@ -75,6 +75,71 @@ describe("prepareStandalone", () => {
     expect(() => prepareStandalone(webRoot)).toThrow("outside standalone output");
     expect(fs.readFileSync(path.join(outsideStatic, "keep.txt"), "utf8")).toBe("must-survive");
   });
+
+  test("rejects a standalone root symlink before changing external assets", () => {
+    const webRoot = makeWebRoot();
+    writeFile(path.join(webRoot, "public", "brand.txt"), "current-public");
+    writeFile(path.join(webRoot, ".next", "static", "chunks", "app.js"), "current-static");
+
+    const outsideRoot = makeWebRoot();
+    writeFile(path.join(outsideRoot, "server.js"), "// external server");
+    writeFile(path.join(outsideRoot, "sentinel.txt"), "must-survive");
+    writeFile(path.join(outsideRoot, "public", "external.txt"), "external-public");
+    writeFile(path.join(outsideRoot, ".next", "static", "external.js"), "external-static");
+    fs.symlinkSync(outsideRoot, path.join(webRoot, ".next", "standalone"), "dir");
+
+    expect(() => prepareStandalone(webRoot)).toThrow("standalone output must be a real directory");
+    expect(fs.readFileSync(path.join(outsideRoot, "sentinel.txt"), "utf8")).toBe("must-survive");
+    expect(fs.readFileSync(path.join(outsideRoot, "public", "external.txt"), "utf8")).toBe(
+      "external-public",
+    );
+    expect(fs.readFileSync(path.join(outsideRoot, ".next", "static", "external.js"), "utf8")).toBe(
+      "external-static",
+    );
+  });
+
+  test.each([
+    ["public directory", "public"],
+    ["Next static directory", path.join(".next", "static")],
+  ])("rejects a symlinked %s source root", (expectedMessage, sourcePath) => {
+    const webRoot = createCompleteFixture();
+    const outsideRoot = makeWebRoot();
+    writeFile(path.join(outsideRoot, "external.txt"), "external-source");
+    fs.rmSync(path.join(webRoot, sourcePath), { force: true, recursive: true });
+    fs.symlinkSync(outsideRoot, path.join(webRoot, sourcePath), "dir");
+
+    expect(() => prepareStandalone(webRoot)).toThrow(`${expectedMessage} must be a real directory`);
+  });
+
+  test.each([
+    ["file", path.join("public", "linked.txt"), "file"],
+    ["directory", path.join(".next", "static", "linked"), "dir"],
+  ])("rejects a source tree containing a %s symlink", (_kind, linkPath, linkType) => {
+    const webRoot = createCompleteFixture();
+    const outsideRoot = makeWebRoot();
+    const outsideTarget =
+      linkType === "file" ? path.join(outsideRoot, "secret.txt") : path.join(outsideRoot, "assets");
+    if (linkType === "file") {
+      writeFile(outsideTarget, "external-secret");
+    } else {
+      writeFile(path.join(outsideTarget, "secret.txt"), "external-secret");
+    }
+    fs.symlinkSync(outsideTarget, path.join(webRoot, linkPath), linkType as fs.symlink.Type);
+
+    expect(() => prepareStandalone(webRoot)).toThrow("Source asset trees cannot contain symlinks");
+  });
+
+  test("rejects a symlinked standalone server entry", () => {
+    const webRoot = createCompleteFixture();
+    const outsideRoot = makeWebRoot();
+    const serverEntry = path.join(webRoot, ".next", "standalone", "server.js");
+    const outsideServer = path.join(outsideRoot, "server.js");
+    writeFile(outsideServer, "// external server");
+    fs.rmSync(serverEntry);
+    fs.symlinkSync(outsideServer, serverEntry, "file");
+
+    expect(() => prepareStandalone(webRoot)).toThrow("standalone server must be a regular file");
+  });
 });
 
 test("production entry points use the local standalone launcher", () => {
