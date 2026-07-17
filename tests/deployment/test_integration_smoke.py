@@ -112,6 +112,21 @@ def test_smoke_script_declares_secure_dual_service_contract() -> None:
     assert "--data" not in content
 
 
+def test_health_polling_enforces_a_total_deadline_in_seconds() -> None:
+    content = SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'local timeout_seconds="$3"' in content
+    assert "local deadline=$((SECONDS + timeout_seconds))" in content
+    assert "while ((SECONDS < deadline))" in content
+    assert "local remaining_seconds=$((deadline - SECONDS))" in content
+    assert 'if ((remaining_seconds < curl_timeout))' in content
+    assert '--max-time "$curl_timeout"' in content
+    assert 'poll_health "API readiness" "$API_BASE_URL/health/ready" 30' in content
+    assert 'poll_health "Web health" "$WEB_BASE_URL/api/health" 60' in content
+    assert 'local attempts="$3"' not in content
+    assert "attempt <= attempts" not in content
+
+
 def test_smoke_script_checks_api_auth_and_validates_both_bodyless_responses(
     tmp_path: Path,
 ) -> None:

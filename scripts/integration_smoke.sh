@@ -29,16 +29,27 @@ fail() {
 poll_health() {
   local label="$1"
   local url="$2"
-  local attempts="$3"
+  local timeout_seconds="$3"
+  local deadline=$((SECONDS + timeout_seconds))
   local status=""
 
-  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
-    status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 "$url" 2>/dev/null || true)"
+  while ((SECONDS < deadline)); do
+    local remaining_seconds=$((deadline - SECONDS))
+    local curl_timeout=2
+    if ((remaining_seconds < curl_timeout)); then
+      curl_timeout="$remaining_seconds"
+    fi
+
+    status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time "$curl_timeout" "$url" 2>/dev/null || true)"
     if [[ "$status" == "200" ]]; then
       printf '%s: 200\n' "$label"
       return 0
     fi
-    sleep 1
+
+    remaining_seconds=$((deadline - SECONDS))
+    if ((remaining_seconds > 0)); then
+      sleep 1
+    fi
   done
 
   fail "$label did not become ready"
