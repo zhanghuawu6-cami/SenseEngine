@@ -523,19 +523,28 @@ def main() -> int:
     previous_handlers: dict[signal.Signals, SignalHandler] = {
         signum: signal.getsignal(signum) for signum in RELEASE_SIGNALS
     }
+    exit_code = 0
+    failure_reported = False
     try:
-        for signum in RELEASE_SIGNALS:
-            signal.signal(
-                signum,
-                _raise_release_interrupted,
-            )
-        release()
-    except Exception as error:
-        sys.stderr.write(f"Render release failed ({type(error).__name__}).\n")
-        return 1
-    finally:
+        try:
+            for signum in RELEASE_SIGNALS:
+                signal.signal(
+                    signum,
+                    _raise_release_interrupted,
+                )
+            release()
+        except Exception as error:
+            failure_reported = True
+            sys.stderr.write(f"Render release failed ({type(error).__name__}).\n")
+            exit_code = 1
+        finally:
+            _restore_release_signal_handlers(previous_handlers)
+    except ReleaseInterrupted as error:
         _restore_release_signal_handlers(previous_handlers)
-    return 0
+        if not failure_reported:
+            sys.stderr.write(f"Render release failed ({type(error).__name__}).\n")
+        exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":

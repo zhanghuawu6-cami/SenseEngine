@@ -7,7 +7,7 @@ import signal
 import sys
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from email.message import Message
 from pathlib import Path
 from types import FrameType, TracebackType
@@ -1031,6 +1031,59 @@ def test_signal_between_handler_restores_does_not_interrupt_main(
     assert signal.pthread_sigmask(signal.SIG_BLOCK, ()) == previous_mask
     captured = capsys.readouterr()
     assert captured.err == "Render release failed (RuntimeError).\n"
+    assert API_KEY not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("release_error", "expected_error_name"),
+    [
+        (None, "ReleaseInterrupted"),
+        (RuntimeError(f"private {API_KEY}"), "RuntimeError"),
+    ],
+)
+def test_signal_before_restore_mask_is_retried_without_duplicate_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+    release_error: Exception | None,
+    expected_error_name: str,
+) -> None:
+    previous_handler_calls, previous_handler = benign_signal_handlers
+    real_pthread_sigmask = signal.pthread_sigmask
+    previous_mask = real_pthread_sigmask(signal.SIG_BLOCK, ())
+    interrupted = False
+
+    def interrupting_pthread_sigmask(
+        how: int,
+        mask: Iterable[int],
+    ) -> set[int | signal.Signals]:
+        nonlocal interrupted
+        if how == signal.SIG_BLOCK and not interrupted:
+            interrupted = True
+            signal.raise_signal(signal.SIGTERM)
+        return real_pthread_sigmask(how, mask)
+
+    def fake_release() -> None:
+        if release_error is not None:
+            raise release_error
+
+    monkeypatch.setattr(
+        render_release.signal,
+        "pthread_sigmask",
+        interrupting_pthread_sigmask,
+    )
+    monkeypatch.setattr(render_release, "release", fake_release)
+
+    assert render_release.main() == 1
+
+    assert interrupted is True
+    assert previous_handler_calls == []
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+    assert signal.pthread_sigmask(signal.SIG_BLOCK, ()) == previous_mask
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == f"Render release failed ({expected_error_name}).\n"
     assert API_KEY not in captured.err
 
 
