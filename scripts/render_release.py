@@ -35,6 +35,7 @@ FAILED_DEPLOY_STATUSES = frozenset(
         "deactivated",
     }
 )
+RELEASE_SIGNALS = (signal.SIGINT, signal.SIGTERM)
 
 JsonValue: TypeAlias = (
     str
@@ -65,9 +66,14 @@ def _raise_release_interrupted(
     frame: FrameType | None,
 ) -> NoReturn:
     del signum, frame
-    for interrupt_signal in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(interrupt_signal, signal.SIG_IGN)
+    _latch_release_signals()
     raise ReleaseInterrupted("Render release interrupted.")
+
+
+def _latch_release_signals() -> None:
+    for interrupt_signal in RELEASE_SIGNALS:
+        if signal.getsignal(interrupt_signal) is _raise_release_interrupted:
+            signal.signal(interrupt_signal, signal.SIG_IGN)
 
 
 def _json_payload(content: bytes, *, source: str) -> JsonValue:
@@ -401,6 +407,44 @@ def _log(message: str) -> None:
     print(message, flush=True)
 
 
+def _recover_release(
+    api_service_id: str,
+    old_api_deploy: str,
+    web_service_id: str,
+    old_web_deploy: str,
+    web_url: str,
+) -> list[str]:
+    _latch_release_signals()
+    _log("Release failed; restoring previous deployments.")
+    recovery_failures: list[str] = []
+    for label, service_id, deploy_id in (
+        ("web rollback", web_service_id, old_web_deploy),
+        ("API rollback", api_service_id, old_api_deploy),
+    ):
+        try:
+            rollback(service_id, deploy_id)
+        except Exception:
+            recovery_failures.append(label)
+    try:
+        _check_web_health(web_url)
+    except Exception:
+        recovery_failures.append("health check")
+    return recovery_failures
+
+
+def _raise_release_failure(
+    stage: str,
+    release_error: Exception,
+    recovery_failures: list[str],
+) -> NoReturn:
+    recovery_summary = ""
+    if recovery_failures:
+        recovery_summary = f" Recovery failed: {', '.join(recovery_failures)}."
+    raise ReleaseError(
+        f"Release failed during {stage}.{recovery_summary}"
+    ) from release_error
+
+
 def release() -> None:
     """Deploy API then Web, verify publicly, and recover both on failure."""
     environment = _required_environment()
@@ -418,60 +462,69 @@ def release() -> None:
 
     stage = "API deployment"
     try:
-        _log("Starting API deployment.")
-        api_deploy = start_deploy(api_service_id, commit_id)
-        wait_for_live(
-            api_service_id,
-            api_deploy,
-            expected_commit_id=commit_id,
-        )
-
-        stage = "Web deployment"
-        _log("Starting Web deployment.")
-        web_deploy = start_deploy(web_service_id, commit_id)
-        wait_for_live(
-            web_service_id,
-            web_deploy,
-            expected_commit_id=commit_id,
-        )
-
-        stage = "public smoke check"
-        _log("Running public smoke checks.")
-        smoke_web(web_url)
-    except Exception as release_error:
-        _log("Release failed; restoring previous deployments.")
-        recovery_failures: list[str] = []
-        for label, service_id, deploy_id in (
-            ("web rollback", web_service_id, old_web_deploy),
-            ("API rollback", api_service_id, old_api_deploy),
-        ):
-            try:
-                rollback(service_id, deploy_id)
-            except Exception:
-                recovery_failures.append(label)
         try:
-            _check_web_health(web_url)
-        except Exception:
-            recovery_failures.append("health check")
+            _log("Starting API deployment.")
+            api_deploy = start_deploy(api_service_id, commit_id)
+            wait_for_live(
+                api_service_id,
+                api_deploy,
+                expected_commit_id=commit_id,
+            )
 
-        recovery_summary = ""
-        if recovery_failures:
-            recovery_summary = f" Recovery failed: {', '.join(recovery_failures)}."
-        raise ReleaseError(
-            f"Release failed during {stage}.{recovery_summary}"
-        ) from release_error
+            stage = "Web deployment"
+            _log("Starting Web deployment.")
+            web_deploy = start_deploy(web_service_id, commit_id)
+            wait_for_live(
+                web_service_id,
+                web_deploy,
+                expected_commit_id=commit_id,
+            )
+
+            stage = "public smoke check"
+            _log("Running public smoke checks.")
+            smoke_web(web_url)
+        except Exception as release_error:
+            recovery_failures = _recover_release(
+                api_service_id,
+                old_api_deploy,
+                web_service_id,
+                old_web_deploy,
+                web_url,
+            )
+            _raise_release_failure(stage, release_error, recovery_failures)
+    except ReleaseInterrupted as release_error:
+        recovery_failures = _recover_release(
+            api_service_id,
+            old_api_deploy,
+            web_service_id,
+            old_web_deploy,
+            web_url,
+        )
+        _raise_release_failure(stage, release_error, recovery_failures)
 
     _log("Render release completed successfully.")
 
 
+def _restore_release_signal_handlers(
+    previous_handlers: Mapping[signal.Signals, SignalHandler],
+) -> None:
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, RELEASE_SIGNALS)
+    try:
+        for signum in RELEASE_SIGNALS:
+            signal.signal(signum, signal.SIG_IGN)
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+
+
 def main() -> int:
     """Run the release while keeping arbitrary upstream details off stderr."""
-    release_signals = (signal.SIGINT, signal.SIGTERM)
     previous_handlers: dict[signal.Signals, SignalHandler] = {
-        signum: signal.getsignal(signum) for signum in release_signals
+        signum: signal.getsignal(signum) for signum in RELEASE_SIGNALS
     }
     try:
-        for signum in release_signals:
+        for signum in RELEASE_SIGNALS:
             signal.signal(
                 signum,
                 _raise_release_interrupted,
@@ -481,8 +534,7 @@ def main() -> int:
         sys.stderr.write(f"Render release failed ({type(error).__name__}).\n")
         return 1
     finally:
-        for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
+        _restore_release_signal_handlers(previous_handlers)
     return 0
 
 

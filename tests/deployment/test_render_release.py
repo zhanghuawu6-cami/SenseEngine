@@ -933,6 +933,108 @@ def test_main_restores_full_handler_snapshot_if_install_is_interrupted(
 
 
 @pytest.mark.parametrize("interrupt_signal", [signal.SIGINT, signal.SIGTERM])
+def test_first_signal_at_recovery_entry_still_restores_both_services(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+    interrupt_signal: signal.Signals,
+) -> None:
+    _set_required_environment(monkeypatch)
+    previous_handler_calls, previous_handler = benign_signal_handlers
+    calls: list[tuple[object, ...]] = []
+    private_body = f"private smoke failure {API_KEY} {SERVICE_KEY}"
+
+    monkeypatch.setattr(
+        render_release,
+        "get_live_deploy",
+        lambda service_id: "old-api" if service_id == API_SERVICE_ID else "old-web",
+    )
+    monkeypatch.setattr(
+        render_release,
+        "start_deploy",
+        lambda service_id, commit_id: "new-api"
+        if service_id == API_SERVICE_ID
+        else "new-web",
+    )
+    monkeypatch.setattr(render_release, "wait_for_live", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        render_release,
+        "smoke_web",
+        lambda base_url: (_ for _ in ()).throw(RuntimeError(private_body)),
+    )
+
+    def interrupting_log(message: str) -> None:
+        calls.append(("log", message))
+        if message == "Release failed; restoring previous deployments.":
+            signal.raise_signal(interrupt_signal)
+
+    monkeypatch.setattr(render_release, "_log", interrupting_log)
+    monkeypatch.setattr(
+        render_release,
+        "rollback",
+        lambda service_id, deploy_id: calls.append(("rollback", service_id, deploy_id)),
+    )
+    monkeypatch.setattr(
+        render_release,
+        "_check_web_health",
+        lambda base_url: calls.append(("health", base_url)),
+    )
+
+    assert render_release.main() == 1
+
+    recovery_calls = [
+        call for call in calls if call[0] in {"rollback", "health"}
+    ]
+    assert recovery_calls == [
+        ("rollback", WEB_SERVICE_ID, "old-web"),
+        ("rollback", API_SERVICE_ID, "old-api"),
+        ("health", WEB_URL),
+    ]
+    assert previous_handler_calls == []
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+    captured = capsys.readouterr()
+    assert captured.err == "Render release failed (ReleaseError).\n"
+    assert private_body not in captured.out + captured.err
+
+
+def test_signal_between_handler_restores_does_not_interrupt_main(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+) -> None:
+    previous_handler_calls, previous_handler = benign_signal_handlers
+    real_signal = signal.signal
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, ())
+
+    def restore_interrupting_signal(
+        signum: int,
+        handler: Callable[[int, FrameType | None], object] | int | None,
+    ) -> object:
+        replaced_handler = real_signal(signum, handler)
+        if signum == signal.SIGINT and handler is previous_handler:
+            signal.raise_signal(signal.SIGTERM)
+        return replaced_handler
+
+    monkeypatch.setattr(render_release.signal, "signal", restore_interrupting_signal)
+    monkeypatch.setattr(
+        render_release,
+        "release",
+        lambda: (_ for _ in ()).throw(RuntimeError(f"private {API_KEY}")),
+    )
+
+    assert render_release.main() == 1
+
+    assert previous_handler_calls == []
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+    assert signal.pthread_sigmask(signal.SIG_BLOCK, ()) == previous_mask
+    captured = capsys.readouterr()
+    assert captured.err == "Render release failed (RuntimeError).\n"
+    assert API_KEY not in captured.err
+
+
+@pytest.mark.parametrize("interrupt_signal", [signal.SIGINT, signal.SIGTERM])
 @pytest.mark.parametrize("interrupt_stage", ["api-wait", "web-wait", "smoke"])
 def test_main_rolls_back_interrupted_new_deployments_and_restores_handlers(
     monkeypatch: pytest.MonkeyPatch,
