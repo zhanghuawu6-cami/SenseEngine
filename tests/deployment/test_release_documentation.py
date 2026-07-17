@@ -10,6 +10,10 @@ README = (ROOT / "README.md").read_text(encoding="utf-8")
 INTEGRATION_DESIGN = (
     ROOT / "docs/superpowers/specs/2026-07-15-senseorder-web-experience-integration-design.md"
 ).read_text(encoding="utf-8")
+PRODUCTION_CONTEXT_EXPRESSION = (
+    'pipeline.git.branch == "main" and not job.ssh.enabled '
+    'and not (pipeline.config_source starts-with "api")'
+)
 
 
 def _assert_environment_row(variable: str, classification: str) -> None:
@@ -26,7 +30,7 @@ def _assert_production_context_contract(readme: str) -> None:
         "Project restrictions",
         "`gh/zhanghuawu6-cami/SenseEngine`",
         "Expression restrictions",
-        '`pipeline.git.branch == "main"`',
+        f"`{PRODUCTION_CONTEXT_EXPRESSION}`",
         "job filter 本身不能保护 context",
         "`All members`",
         "不能添加其他项目",
@@ -35,6 +39,13 @@ def _assert_production_context_contract(readme: str) -> None:
         "feature branch",
         "unauthorized",
         "只读验证",
+        "Run Pipeline",
+        "`context_probe=true`",
+        "`context_probe=false` 是默认值",
+        "`production-context-probe`",
+        "`context_probe=true` 时只运行专用 `production-context-verification` workflow",
+        "不运行 `verify-and-deploy`",
+        "不触发 `deploy-render`",
         "main 正向验证",
         "授权通过",
         "禁止生产部署",
@@ -48,6 +59,10 @@ def _assert_production_context_contract(readme: str) -> None:
         "保留该默认访问",
         "可以打开、复制或记录",
         "授权失败",
+        '`pipeline.git.branch == "main"`',
+        "`context_probe=true` 时同时运行专用 `production-context-verification` 和 "
+        "`verify-and-deploy` workflow",
+        "`context_probe=true` 是默认值",
     ):
         assert forbidden not in readme
 
@@ -235,6 +250,17 @@ def test_readme_requires_external_protection_for_the_production_context() -> Non
         ("不要打开、复制或记录", "可以打开、复制或记录"),
         ("授权通过", "授权失败"),
         ("不能添加其他项目", "可以添加其他项目"),
+        (
+            f"`{PRODUCTION_CONTEXT_EXPRESSION}`",
+            '`pipeline.git.branch == "main"`',
+        ),
+        (
+            "`context_probe=true` 时只运行专用 `production-context-verification` workflow",
+            "`context_probe=true` 时同时运行专用 `production-context-verification` 和 "
+            "`verify-and-deploy` workflow",
+        ),
+        ("`context_probe=false` 是默认值", "`context_probe=true` 是默认值"),
+        ("不触发 `deploy-render`", "触发 `deploy-render`"),
     ),
 )
 def test_production_context_contract_rejects_reversed_safety_semantics(

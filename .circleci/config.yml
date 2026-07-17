@@ -1,5 +1,10 @@
 version: 2.1
 
+parameters:
+  context_probe:
+    type: boolean
+    default: false
+
 commands:
   install-uv:
     description: Install the pinned uv release without changing project files.
@@ -321,6 +326,26 @@ jobs:
               "const fs = require('node:fs'); const path = require('node:path'); const Database = require('better-sqlite3'); const filename = 'circleci-restore-fixture.png'; const content = Buffer.from('circleci-restore-fixture'); const db = new Database(process.env.DATABASE_PATH); try { db.exec('CREATE TABLE IF NOT EXISTS media (id TEXT PRIMARY KEY, filename TEXT NOT NULL UNIQUE, original_name TEXT NOT NULL, mime_type TEXT NOT NULL, size INTEGER NOT NULL, url TEXT NOT NULL, created_at TEXT NOT NULL)'); fs.mkdirSync(process.env.MEDIA_ROOT, {recursive: true}); fs.writeFileSync(path.join(process.env.MEDIA_ROOT, filename), content, {flag: 'wx', mode: 0o600}); db.prepare('INSERT INTO media (id, filename, original_name, mime_type, size, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run('circleci-restore-fixture', filename, filename, 'image/png', content.length, '/api/media/' + filename, new Date().toISOString()); } finally { db.close(); }"
             docker exec "$web_container" node scripts/verify-restored-data.mjs
 
+  production-context-probe:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Confirm production context authorization
+          command: |
+            set -euo pipefail
+
+            required_variables=(
+              RENDER_API_KEY
+              RENDER_API_SERVICE_ID
+              RENDER_WEB_SERVICE_ID
+              PRODUCTION_WEB_URL
+            )
+            for variable in "${required_variables[@]}"; do
+              [[ -n "${!variable:-}" ]] || exit 1
+            done
+            printf '%s\n' 'Production context authorized.'
+
   deploy-render:
     docker:
       - image: cimg/python:3.12-node
@@ -334,6 +359,8 @@ jobs:
 
 workflows:
   verify-and-deploy:
+    when:
+      not: << pipeline.parameters.context_probe >>
     jobs:
       - python-gate
       - web-gate
@@ -365,3 +392,9 @@ workflows:
               only: main
             tags:
               ignore: /.*/
+
+  production-context-verification:
+    when: << pipeline.parameters.context_probe >>
+    jobs:
+      - production-context-probe:
+          context: senseorder-production

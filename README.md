@@ -204,20 +204,24 @@ Security** 中完成以下配置：
 1. 在 **Project restrictions** 中只添加 `gh/zhanghuawu6-cami/SenseEngine`；如果 UI 显示不可变
    project ID，则核对并记录该仓库对应的 project ID，不能添加其他项目。
 2. 在 **Expression restrictions** 中添加并保存精确表达式
-   `pipeline.git.branch == "main"`。
+   `pipeline.git.branch == "main" and not job.ssh.enabled and not (pipeline.config_source starts-with "api")`。
 3. 如果 context 仍为默认 `All members` 或无限制访问，删除该默认访问并按组织权限策略只保留
    经批准的生产发布人员组。不要打开、复制或记录 context 中的 secret 值。
 
 配置后执行以下 UI 只读验证，并在变更记录中保存不含 secret 的页面状态、操作人和时间：
 
 1. 重新打开上述 **Security** 页面，确认 Project restrictions 只列出目标项目，Expression restrictions
-   只列出精确 main 表达式，且不存在 `All members` 或无限制访问。
-2. 做 feature branch 负向验证：触发经组织管理员审查、无部署副作用且不读取环境变量内容的
-   context probe job，并显式引用 `senseorder-production`。预期 CircleCI 在 executor 启动前显示
-   `Unauthorized`，部署 job 不应获得 secret。仅看到 `deploy-render` 被 branch filter 跳过不能作为
-   context unauthorized 的证据；如果没有这种安全 probe，验证尚未完成。
-3. 做 main 正向验证：在 `main` 对同一个无部署副作用的 probe job 触发 pipeline，确认 context
-   授权通过、job 成功且日志不含任何变量值。记录两个 pipeline URL 和结果，不记录 secret 值。
+   只列出上述强表达式，且不存在 `All members` 或无限制访问。
+2. 在项目的 **Run Pipeline** 页面选择一个 feature branch，添加 boolean 参数 `context_probe=true`
+   并运行。`context_probe=true` 时只运行专用 `production-context-verification` workflow，其中只有
+   `production-context-probe`，不运行 `verify-and-deploy`，也不触发 `deploy-render`。预期 CircleCI
+   在 executor 启动前显示 `Unauthorized`，部署 job 不应获得 secret；仅看到 branch filter 跳过部署
+   不能作为 context unauthorized 的证据。
+3. 回到 **Run Pipeline**，选择 `main` 并再次设置 `context_probe=true`，完成 main 正向验证。
+   仍应只调度同一个 probe job；确认 context 授权通过、job 成功且日志只有固定授权消息，不含任何
+   变量值，也不调用 Render 或触发真实部署。记录两个 pipeline URL 和结果，不记录 secret 值。
+4. `context_probe=false` 是默认值；只有该值才运行正常 `verify-and-deploy` 门禁，并在 `main` 门禁
+   全部成功后调度 `deploy-render`。不得把默认值用于上述 context 正负验证。
 
 两项限制和正负验证全部完成前必须 **STOP**，禁止生产部署。本机没有具备组织只读权限的
 CircleCI token 时，仓库文件和本地命令不能证明平台状态，必须由 organization admin 在 CircleCI UI

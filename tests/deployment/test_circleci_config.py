@@ -9,6 +9,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / ".circleci" / "config.yml"
 WORKFLOW_NAME = "verify-and-deploy"
+PROBE_WORKFLOW_NAME = "production-context-verification"
+PROBE_JOB_NAME = "production-context-probe"
 VERIFICATION_GATES = {
     "python-gate",
     "web-gate",
@@ -40,10 +42,13 @@ def _jobs(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return jobs
 
 
-def _workflow_jobs(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _workflow_jobs(
+    config: dict[str, Any],
+    workflow_name: str = WORKFLOW_NAME,
+) -> dict[str, dict[str, Any]]:
     workflows = config["workflows"]
     assert isinstance(workflows, dict)
-    workflow = workflows[WORKFLOW_NAME]
+    workflow = workflows[workflow_name]
     assert isinstance(workflow, dict)
     entries = workflow["jobs"]
     assert isinstance(entries, list)
@@ -148,6 +153,56 @@ def test_deployment_is_main_only_serialized_and_protected_by_context() -> None:
     serial_group = deploy["serial-group"]
     assert isinstance(serial_group, str) and serial_group.strip()
     assert serial_group.startswith("<< pipeline.project.slug >>/")
+
+
+def test_context_probe_parameter_selects_exactly_one_workflow() -> None:
+    config = _config()
+    parameters = config["parameters"]
+    assert isinstance(parameters, dict)
+    assert parameters["context_probe"] == {"type": "boolean", "default": False}
+
+    workflows = config["workflows"]
+    assert isinstance(workflows, dict)
+    normal_workflow = workflows[WORKFLOW_NAME]
+    probe_workflow = workflows[PROBE_WORKFLOW_NAME]
+    assert isinstance(normal_workflow, dict)
+    assert isinstance(probe_workflow, dict)
+    assert normal_workflow["when"] == {
+        "not": "<< pipeline.parameters.context_probe >>"
+    }
+    assert probe_workflow["when"] == "<< pipeline.parameters.context_probe >>"
+
+    probe_jobs = _workflow_jobs(config, PROBE_WORKFLOW_NAME)
+    assert set(probe_jobs) == {PROBE_JOB_NAME}
+    assert probe_jobs[PROBE_JOB_NAME]["context"] == "senseorder-production"
+    assert "deploy-render" not in probe_jobs
+
+
+def test_production_context_probe_only_checks_secret_presence_indirectly() -> None:
+    job = _jobs(_config())[PROBE_JOB_NAME]
+    steps = _steps(job)
+    assert len(steps) == 1
+    assert isinstance(steps[0], dict) and "run" in steps[0]
+
+    command = _run_commands(job)
+    assert '[[ -n "${!variable:-}" ]]' in command
+    for variable in PRODUCTION_ENVIRONMENT:
+        assert variable in command
+        assert f"${variable}" not in command
+        assert f"${{{variable}" not in command
+
+    print_lines = [line.strip() for line in command.splitlines() if "printf" in line]
+    assert print_lines == ["printf '%s\\n' 'Production context authorized.'"]
+    for forbidden in (
+        "echo",
+        "printenv",
+        "set -x",
+        "render_release.py",
+        "api.render.com",
+        "curl",
+    ):
+        assert forbidden not in command
+    assert re.search(r"(?m)^\s*env(?:\s|$)", command) is None
 
 
 def test_verification_gates_cannot_access_production_context_or_variables() -> None:
