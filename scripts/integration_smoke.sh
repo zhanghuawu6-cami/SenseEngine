@@ -19,7 +19,9 @@ web_response="$(mktemp "${TMPDIR:-/tmp}/senseorder-web-response.XXXXXX")"
 cleanup() {
   rm -f "$api_unauthorized_response" "$api_response" "$web_response"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 fail() {
   printf 'integration smoke failed: %s\n' "$1" >&2

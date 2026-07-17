@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import signal
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -43,6 +45,10 @@ while (($#)); do
     *) exit 90 ;;
   esac
 done
+if [[ -n "${{FAKE_CURL_BLOCK_MARKER:-}}" && ! -e "$FAKE_CURL_BLOCK_MARKER" ]]; then
+  : >"$FAKE_CURL_BLOCK_MARKER"
+  sleep 1
+fi
 case "$url" in
   "{PRIVATE_URL}/health/ready") status=200; body='{{"status":"ready"}}' ;;
   "{PRIVATE_URL}/v1/demo/run")
@@ -66,6 +72,7 @@ printf '%s' "$status"
 set -euo pipefail
 [[ "$*" == "--prefix web run validate:demo-response" ]] || exit 95
 cat >/dev/null
+if [[ -n "${FAKE_NPM_SENTINEL:-}" ]]; then : >"$FAKE_NPM_SENTINEL"; fi
 printf '%s\n' 'validated SenseEngine demo response'
 """
     _write_executable(fake_bin / "curl", curl_script)
@@ -80,6 +87,7 @@ printf '%s\n' 'validated SenseEngine demo response'
             "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
             "SENSE_ENGINE_PRIVATE_URL": PRIVATE_URL,
             "SENSE_ENGINE_SERVICE_KEY": SERVICE_KEY,
+            "TMPDIR": str(tmp_path),
         }
     )
     return environment
@@ -96,6 +104,15 @@ def _run_smoke(environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _wait_for_path(path: Path, timeout_seconds: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if path.exists():
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"Timed out waiting for {path.name}")
+
+
 def test_smoke_script_declares_secure_dual_service_contract() -> None:
     content = SMOKE_SCRIPT.read_text(encoding="utf-8")
 
@@ -105,7 +122,10 @@ def test_smoke_script_declares_secure_dual_service_contract() -> None:
     assert "${WEB_BASE_URL:-http://127.0.0.1:3000}" in content
     assert "mktemp" in content
     assert "umask 077" in content
-    assert "trap" in content
+    assert "trap cleanup EXIT" in content
+    assert "trap 'exit 130' INT" in content
+    assert "trap 'exit 143' TERM" in content
+    assert "trap cleanup EXIT INT TERM" not in content
     assert "npm --prefix web run validate:demo-response" in content
     assert content.count("npm --prefix web run validate:demo-response") == 2
     assert "/tmp/senseengine-demo-response.json" not in content
@@ -125,6 +145,36 @@ def test_health_polling_enforces_a_total_deadline_in_seconds() -> None:
     assert 'poll_health "Web health" "$WEB_BASE_URL/api/health" 60' in content
     assert 'local attempts="$3"' not in content
     assert "attempt <= attempts" not in content
+
+
+def test_term_stops_the_smoke_before_later_api_steps(tmp_path: Path) -> None:
+    environment = _fake_environment(tmp_path)
+    block_marker = tmp_path / "health-curl-started"
+    sentinel = tmp_path / "validator-ran"
+    environment["FAKE_CURL_BLOCK_MARKER"] = str(block_marker)
+    environment["FAKE_NPM_SENTINEL"] = str(sentinel)
+    process = subprocess.Popen(
+        ["bash", str(SMOKE_SCRIPT)],
+        cwd=ROOT,
+        env=environment,
+        start_new_session=True,
+        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+
+    _wait_for_path(block_marker)
+    process.send_signal(signal.SIGTERM)
+    try:
+        stdout, stderr = process.communicate(timeout=3)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        stdout, stderr = process.communicate()
+
+    assert process.returncode == 143, stdout + stderr
+    assert not sentinel.exists(), stdout + stderr
+    assert not tuple(tmp_path.glob("senseengine-api-*.??????"))
+    assert not tuple(tmp_path.glob("senseorder-web-response.??????"))
 
 
 def test_smoke_script_checks_api_auth_and_validates_both_bodyless_responses(
