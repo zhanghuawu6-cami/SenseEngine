@@ -217,6 +217,10 @@ def wait_for_live(
             raise ReleaseError("Render deployment reached a failed terminal status.")
 
         remaining = deadline - _monotonic()
+        if remaining <= 0:
+            raise ReleaseError(
+                f"Render deployment did not become live within {timeout_seconds} seconds."
+            )
         _sleep(min(POLL_INTERVAL_SECONDS, remaining))
 
 

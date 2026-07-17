@@ -302,6 +302,33 @@ def test_wait_for_live_rejects_live_returned_after_the_900_second_deadline(
     assert request_timeouts == [30.0, 10.0]
 
 
+def test_wait_for_live_preserves_timeout_error_if_clock_expires_before_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock_values = iter([0.0, 0.0, 899.0, 901.0])
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        render_release,
+        "_render_request",
+        lambda method, path, body=None, *, timeout_seconds=30: {
+            "status": "build_in_progress"
+        },
+    )
+    monkeypatch.setattr(render_release, "_monotonic", lambda: next(clock_values))
+
+    def reject_negative_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if seconds < 0:
+            raise ValueError("sleep length must be non-negative")
+
+    monkeypatch.setattr(render_release, "_sleep", reject_negative_sleep)
+
+    with pytest.raises(render_release.ReleaseError, match="900 seconds"):
+        render_release.wait_for_live(API_SERVICE_ID, "dep-expired-before-sleep")
+
+    assert sleeps == []
+
+
 def test_rollback_uses_old_id_and_waits_for_returned_deploy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
