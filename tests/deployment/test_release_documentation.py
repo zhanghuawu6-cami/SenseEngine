@@ -115,7 +115,7 @@ def test_readme_documents_the_single_instance_render_consistency_boundary() -> N
 
 def test_readme_documents_snapshot_restore_and_quarterly_drills() -> None:
     for requirement in (
-        "每日 `/var/data` 快照",
+        "每 24 小时自动创建",
         "Render Dashboard",
         "同一快照",
         "整体恢复",
@@ -123,16 +123,31 @@ def test_readme_documents_snapshot_restore_and_quarterly_drills() -> None:
         "每季度",
         "Dashboard 的 Restore",
         "不是 CLI 命令",
+        "临时隔离 Web service",
+        "独立持久磁盘",
+        "不切换 DNS",
+        "不接入生产流量",
+        "单实例",
+        "不得在 production 原地 restore",
+        "STOP",
+        "Render 支持",
+        "站外一致性备份",
+        "scripts/verify_restore_drill.sh",
+        "node scripts/verify-restored-data.mjs",
+        "read -rs",
+        "`PRODUCTION_WEB_URL` 也是必填项",
+        "销毁隔离",
     ):
         assert requirement in README
 
-    assert 'curl --fail --silent --show-error "$PRODUCTION_WEB_URL/api/health"' in README
-    assert '--request POST "$PRODUCTION_WEB_URL/api/demo/run"' in README
-    assert "npm --prefix web run validate:demo-response" in README
-    assert '"$PRODUCTION_WEB_URL/api/admin/login"' in README
-    assert '"$PRODUCTION_WEB_URL/api/media/$RESTORE_DRILL_MEDIA_FILENAME"' in README
-    assert "SELECT filename FROM media" in README
-    assert 'join("/var/data/media", row.filename)' in README
+    for forbidden in (
+        "/tmp/senseorder-restore-drill.cookies",
+        "/tmp/senseorder-restore-media.bin",
+        '"password":"$ADMIN_PASSWORD"',
+        "node -e 'const fs=",
+        "开启并定期确认每日",
+    ):
+        assert forbidden not in README
 
 
 def test_readme_documents_circleci_gates_and_production_release_controls() -> None:

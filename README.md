@@ -135,46 +135,53 @@ Web 将 SQLite 放在 `/var/data/senseorder.db`，媒体放在 `/var/data/media`
 
 ### 快照与恢复演练
 
-1. 在 Render Dashboard 的 `senseorder-web` 持久磁盘设置中开启并定期确认每日 `/var/data` 快照。
-2. 恢复时必须选择同一快照对整个 `/var/data` 整体恢复，使数据库与媒体回到同一时点；
-   禁止单独恢复 `senseorder.db` 或 `media/`。
-3. 每季度安排一次受控恢复演练：记录快照时间和当前 deploy ID，进入 Dashboard 的 Restore
-   流程选择快照，确认恢复整个挂载点，等待服务重新可用后执行下方验收。
+Render 对持久磁盘每 24 小时自动创建一次快照。操作员仍须在 Render Dashboard 确认最新
+`/var/data` 快照的时间、状态和账户当前保留期满足恢复目标。数据库与媒体属于同一一致性边界：
+恢复时必须选择同一快照对整个 `/var/data` 整体恢复，禁止单独恢复 `senseorder.db` 或 `media/`。
 
-Dashboard 的 Restore 是 Render 控制台中的人工 UI 操作，不是 CLI 命令；本仓库没有伪造的恢复脚本。
-操作员应在受控终端预先注入 `PRODUCTION_WEB_URL`、`ADMIN_EMAIL`、`ADMIN_PASSWORD` 和
-`RESTORE_DRILL_MEDIA_FILENAME`，不把它们写入命令历史或文档。
+每季度恢复演练不得在 production 原地 restore，也不得把生产服务或生产磁盘作为演练目标。
+Dashboard 的 Restore 是 Render 控制台中的人工 UI 操作，不是 CLI 命令。演练必须先创建一个
+临时隔离 Web service，并为它配置独立持久磁盘、独立 Render URL、独立管理员凭据和独立
+`SESSION_SECRET`。隔离服务保持单实例，不切换 DNS、不接入生产流量，也不复用生产磁盘。
+`SENSE_ENGINE_PRIVATE_URL` 和 service key 应指向非生产的受控 API。
 
-```bash
-curl --fail --silent --show-error "$PRODUCTION_WEB_URL/api/health"
+如果当前 Render Dashboard、账户权限或支持的 Restore 流程只允许对原 production 磁盘执行原地
+恢复，立即 **STOP**：不得在生产环境完成演练。联系 Render 支持确认隔离恢复能力，或先建立并验证
+可恢复数据库和媒体同一时点的站外一致性备份能力，再重新安排演练。
 
-curl --fail --silent --show-error --request POST "$PRODUCTION_WEB_URL/api/demo/run" \
-  | npm --prefix web run validate:demo-response
+受控演练顺序如下：
 
-curl --fail --silent --show-error \
-  --cookie-jar /tmp/senseorder-restore-drill.cookies \
-  --header "Origin: $PRODUCTION_WEB_URL" \
-  --header 'Content-Type: application/json' \
-  --data "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
-  "$PRODUCTION_WEB_URL/api/admin/login"
-
-curl --fail --silent --show-error \
-  --cookie /tmp/senseorder-restore-drill.cookies \
-  "$PRODUCTION_WEB_URL/api/admin/media"
-
-curl --fail --silent --show-error \
-  "$PRODUCTION_WEB_URL/api/media/$RESTORE_DRILL_MEDIA_FILENAME" \
-  --output /tmp/senseorder-restore-media.bin
-test -s /tmp/senseorder-restore-media.bin
-```
-
-最后，在 Render Web Shell 内运行一致性检查；任一 SQLite 媒体记录缺少对应文件都必须使演练失败：
+1. 记录选定快照时间、生产 deploy ID、保留期和操作员；创建临时隔离 Web service 与独立磁盘，
+   但不切换 DNS、不接入生产流量。
+2. 在 Dashboard 的 Restore 流程中，把选定的同一快照整体恢复到隔离磁盘，确认挂载点仍为
+   `/var/data`；等待隔离服务健康。禁止对生产磁盘点击 Restore。
+3. 从快照记录中选择一个已知存在且非空的媒体文件名。通过 secret manager 预置独立管理员密码，
+   或在不会记录输入的受控终端交互读取；不要把密码作为命令行赋值或写入 shell history：
 
 ```bash
-node -e 'const fs=require("node:fs");const path=require("node:path");const Database=require("better-sqlite3");const db=new Database("/var/data/senseorder.db",{readonly:true});const missing=db.prepare("SELECT filename FROM media").all().filter(row=>!fs.existsSync(path.join("/var/data/media", row.filename)));if(missing.length){console.error(missing);process.exit(1)}console.log("DB-media consistency passed")'
+read -rs -p 'Isolated drill admin password: ' ADMIN_PASSWORD
+printf '\n'
+export ADMIN_PASSWORD
+export ADMIN_EMAIL RESTORE_DRILL_MEDIA_FILENAME
+export RESTORE_DRILL_WEB_URL PRODUCTION_WEB_URL
+export RESTORE_DRILL_ISOLATED_TARGET=confirmed
+scripts/verify_restore_drill.sh
 ```
 
-将快照时间、Restore 操作人、deploy ID、上述验收结果和恢复耗时记入季度演练记录。
+`RESTORE_DRILL_WEB_URL` 必须是隔离服务的公开 HTTPS base URL；`PRODUCTION_WEB_URL` 也是必填项，
+但只作为防止误指向生产的对照值。脚本使用私有临时目录、严格超时、无重定向请求和 Zod 响应校验，依次验证
+health、bodyless demo、独立管理员登录、数据库媒体记录和公开媒体字节数，不输出凭据或失败响应体。
+
+4. 在临时隔离服务的 Render Web Shell 内对实际挂载数据运行闭集一致性校验；镜像已包含该脚本：
+
+```bash
+DATABASE_PATH=/var/data/senseorder.db \
+MEDIA_ROOT=/var/data/media \
+node scripts/verify-restored-data.mjs
+```
+
+5. 记录 Restore 操作人、隔离服务和磁盘标识、验收结果、恢复耗时及发现的问题。保存不含凭据的
+   演练记录后，销毁隔离 Web service、独立持久磁盘和临时凭据，确认生产资源从未被修改。
 
 ## CircleCI 门禁与发布
 
