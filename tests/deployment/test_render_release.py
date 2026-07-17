@@ -3,12 +3,14 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import signal
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from email.message import Message
 from pathlib import Path
-from types import TracebackType
+from types import FrameType, TracebackType
 from typing import Any, Self, cast
 
 import pytest
@@ -84,6 +86,25 @@ def _set_required_environment(
 
 def _valid_demo_payload() -> object:
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def benign_signal_handlers() -> Iterator[tuple[list[signal.Signals], object]]:
+    signals = (signal.SIGINT, signal.SIGTERM)
+    original_handlers = {signum: signal.getsignal(signum) for signum in signals}
+    calls: list[signal.Signals] = []
+
+    def previous_handler(signum: int, frame: FrameType | None) -> None:
+        del frame
+        calls.append(signal.Signals(signum))
+
+    for signum in signals:
+        signal.signal(signum, previous_handler)
+    try:
+        yield calls, previous_handler
+    finally:
+        for signum, handler in original_handlers.items():
+            signal.signal(signum, handler)
 
 
 def test_render_request_builds_authenticated_json_request(
@@ -825,3 +846,177 @@ def test_main_returns_nonzero_and_prints_only_sanitized_summary(
     assert "Render release failed" in captured.err
     assert API_KEY not in captured.err
     assert private_body not in captured.err
+
+
+def test_release_interrupted_is_an_exception() -> None:
+    assert issubclass(render_release.ReleaseInterrupted, Exception)
+
+
+@pytest.mark.parametrize("interrupt_signal", [signal.SIGINT, signal.SIGTERM])
+@pytest.mark.parametrize("interrupt_stage", ["api-wait", "web-wait", "smoke"])
+def test_main_rolls_back_interrupted_new_deployments_and_restores_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+    interrupt_signal: signal.Signals,
+    interrupt_stage: str,
+) -> None:
+    _set_required_environment(monkeypatch)
+    previous_handler_calls, previous_handler = benign_signal_handlers
+    calls: list[tuple[object, ...]] = []
+
+    def fake_get(service_id: str) -> str:
+        return "old-api" if service_id == API_SERVICE_ID else "old-web"
+
+    def fake_start(service_id: str, commit_id: str) -> str:
+        assert commit_id == NORMALIZED_COMMIT_SHA
+        return "new-api" if service_id == API_SERVICE_ID else "new-web"
+
+    def interrupt(stage: str) -> None:
+        calls.append((stage,))
+        if stage == interrupt_stage:
+            signal.raise_signal(interrupt_signal)
+
+    def fake_wait(
+        service_id: str,
+        deploy_id: str,
+        timeout_seconds: int = 900,
+        *,
+        expected_commit_id: str | None = None,
+    ) -> None:
+        del deploy_id, timeout_seconds
+        assert expected_commit_id == NORMALIZED_COMMIT_SHA
+        interrupt("api-wait" if service_id == API_SERVICE_ID else "web-wait")
+
+    monkeypatch.setattr(render_release, "get_live_deploy", fake_get)
+    monkeypatch.setattr(render_release, "start_deploy", fake_start)
+    monkeypatch.setattr(render_release, "wait_for_live", fake_wait)
+    monkeypatch.setattr(render_release, "smoke_web", lambda base_url: interrupt("smoke"))
+    monkeypatch.setattr(
+        render_release,
+        "rollback",
+        lambda service_id, deploy_id: calls.append(("rollback", service_id, deploy_id)),
+    )
+    monkeypatch.setattr(
+        render_release,
+        "_check_web_health",
+        lambda base_url: calls.append(("health", base_url)),
+    )
+
+    assert render_release.main() == 1
+
+    recovery_calls = [
+        call for call in calls if call[0] in {"rollback", "health"}
+    ]
+    assert recovery_calls == [
+        ("rollback", WEB_SERVICE_ID, "old-web"),
+        ("rollback", API_SERVICE_ID, "old-api"),
+        ("health", WEB_URL),
+    ]
+    assert previous_handler_calls == []
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+    captured = capsys.readouterr()
+    assert captured.err == "Render release failed (ReleaseError).\n"
+    assert API_KEY not in captured.out + captured.err
+    assert SERVICE_KEY not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("interrupt_signal", [signal.SIGINT, signal.SIGTERM])
+def test_main_does_not_roll_back_when_interrupted_while_recording_old_deploys(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+    interrupt_signal: signal.Signals,
+) -> None:
+    _set_required_environment(monkeypatch)
+    previous_handler_calls, previous_handler = benign_signal_handlers
+    calls: list[tuple[object, ...]] = []
+
+    def fake_get(service_id: str) -> str:
+        calls.append(("get", service_id))
+        signal.raise_signal(interrupt_signal)
+        return "old"
+
+    def fake_start(service_id: str, commit_id: str) -> str:
+        calls.append(("start", service_id, commit_id))
+        return "new"
+
+    monkeypatch.setattr(render_release, "get_live_deploy", fake_get)
+    monkeypatch.setattr(render_release, "start_deploy", fake_start)
+    monkeypatch.setattr(render_release, "wait_for_live", lambda *args, **kwargs: None)
+    monkeypatch.setattr(render_release, "smoke_web", lambda base_url: None)
+    monkeypatch.setattr(
+        render_release,
+        "rollback",
+        lambda service_id, deploy_id: calls.append(("rollback", service_id, deploy_id)),
+    )
+
+    assert render_release.main() == 1
+
+    assert [call for call in calls if call[0] == "rollback"] == []
+    assert previous_handler_calls == []
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+    captured = capsys.readouterr()
+    assert captured.err == "Render release failed (ReleaseError).\n"
+    assert API_KEY not in captured.out + captured.err
+    assert SERVICE_KEY not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("interrupt_signal", [signal.SIGINT, signal.SIGTERM])
+def test_second_signal_during_web_rollback_still_attempts_api_and_health(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+    interrupt_signal: signal.Signals,
+) -> None:
+    _set_required_environment(monkeypatch)
+    previous_handler_calls, previous_handler = benign_signal_handlers
+    calls: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(
+        render_release,
+        "get_live_deploy",
+        lambda service_id: "old-api" if service_id == API_SERVICE_ID else "old-web",
+    )
+    monkeypatch.setattr(
+        render_release,
+        "start_deploy",
+        lambda service_id, commit_id: "new-api"
+        if service_id == API_SERVICE_ID
+        else "new-web",
+    )
+    monkeypatch.setattr(render_release, "wait_for_live", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        render_release,
+        "smoke_web",
+        lambda base_url: signal.raise_signal(interrupt_signal),
+    )
+
+    def interrupted_rollback(service_id: str, deploy_id: str) -> None:
+        calls.append(("rollback", service_id, deploy_id))
+        if service_id == WEB_SERVICE_ID:
+            signal.raise_signal(interrupt_signal)
+
+    monkeypatch.setattr(render_release, "rollback", interrupted_rollback)
+    monkeypatch.setattr(
+        render_release,
+        "_check_web_health",
+        lambda base_url: calls.append(("health", base_url)),
+    )
+
+    assert render_release.main() == 1
+
+    assert calls == [
+        ("rollback", WEB_SERVICE_ID, "old-web"),
+        ("rollback", API_SERVICE_ID, "old-api"),
+        ("health", WEB_URL),
+    ]
+    assert previous_handler_calls == []
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+    captured = capsys.readouterr()
+    assert captured.err == "Render release failed (ReleaseError).\n"
+    assert API_KEY not in captured.out + captured.err
+    assert SERVICE_KEY not in captured.out + captured.err

@@ -6,13 +6,15 @@ import json
 import math
 import os
 import re
+import signal
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Mapping
-from typing import TypeAlias, cast
+from collections.abc import Callable, Mapping
+from types import FrameType
+from typing import NoReturn, TypeAlias, cast
 
 RENDER_API_BASE = "https://api.render.com"
 HTTP_TIMEOUT_SECONDS = 30
@@ -44,6 +46,7 @@ JsonValue: TypeAlias = (
     | dict[str, "JsonValue"]
 )
 JsonObject: TypeAlias = dict[str, JsonValue]
+SignalHandler: TypeAlias = Callable[[int, FrameType | None], object] | int | None
 
 _monotonic = time.monotonic
 _sleep = time.sleep
@@ -51,6 +54,18 @@ _sleep = time.sleep
 
 class ReleaseError(RuntimeError):
     """A sanitized deployment, rollback, or smoke-check failure."""
+
+
+class ReleaseInterrupted(Exception):
+    """A sanitized request to stop the release safely."""
+
+
+def _raise_release_interrupted(
+    signum: int,
+    frame: FrameType | None,
+) -> NoReturn:
+    del signum, frame
+    raise ReleaseInterrupted("Render release interrupted.")
 
 
 def _json_payload(content: bytes, *, source: str) -> JsonValue:
@@ -449,11 +464,20 @@ def release() -> None:
 
 def main() -> int:
     """Run the release while keeping arbitrary upstream details off stderr."""
+    previous_handlers: dict[signal.Signals, SignalHandler] = {}
     try:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous_handlers[signum] = signal.signal(
+                signum,
+                _raise_release_interrupted,
+            )
         release()
     except Exception as error:
         sys.stderr.write(f"Render release failed ({type(error).__name__}).\n")
         return 1
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
     return 0
 
 
