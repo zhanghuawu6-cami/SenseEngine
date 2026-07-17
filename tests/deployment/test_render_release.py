@@ -853,6 +853,40 @@ def test_release_interrupted_is_an_exception() -> None:
 
 
 @pytest.mark.parametrize("interrupt_signal", [signal.SIGINT, signal.SIGTERM])
+def test_first_signal_latches_both_signals_until_main_restores_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+    interrupt_signal: signal.Signals,
+) -> None:
+    previous_handler_calls, previous_handler = benign_signal_handlers
+    handlers_during_recovery: list[tuple[object, object]] = []
+
+    def interrupted_release() -> None:
+        try:
+            signal.raise_signal(interrupt_signal)
+        except render_release.ReleaseInterrupted:
+            handlers_during_recovery.append(
+                (
+                    signal.getsignal(signal.SIGINT),
+                    signal.getsignal(signal.SIGTERM),
+                )
+            )
+            raise
+
+    monkeypatch.setattr(render_release, "release", interrupted_release)
+
+    assert render_release.main() == 1
+
+    assert handlers_during_recovery == [(signal.SIG_IGN, signal.SIG_IGN)]
+    assert previous_handler_calls == []
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+    captured = capsys.readouterr()
+    assert captured.err == "Render release failed (ReleaseInterrupted).\n"
+
+
+@pytest.mark.parametrize("interrupt_signal", [signal.SIGINT, signal.SIGTERM])
 @pytest.mark.parametrize("interrupt_stage", ["api-wait", "web-wait", "smoke"])
 def test_main_rolls_back_interrupted_new_deployments_and_restores_handlers(
     monkeypatch: pytest.MonkeyPatch,
@@ -974,6 +1008,9 @@ def test_second_signal_during_web_rollback_still_attempts_api_and_health(
     _set_required_environment(monkeypatch)
     previous_handler_calls, previous_handler = benign_signal_handlers
     calls: list[tuple[object, ...]] = []
+    second_signal = (
+        signal.SIGTERM if interrupt_signal == signal.SIGINT else signal.SIGINT
+    )
 
     monkeypatch.setattr(
         render_release,
@@ -997,7 +1034,7 @@ def test_second_signal_during_web_rollback_still_attempts_api_and_health(
     def interrupted_rollback(service_id: str, deploy_id: str) -> None:
         calls.append(("rollback", service_id, deploy_id))
         if service_id == WEB_SERVICE_ID:
-            signal.raise_signal(interrupt_signal)
+            signal.raise_signal(second_signal)
 
     monkeypatch.setattr(render_release, "rollback", interrupted_rollback)
     monkeypatch.setattr(

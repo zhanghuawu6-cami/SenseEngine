@@ -65,6 +65,8 @@ def _raise_release_interrupted(
     frame: FrameType | None,
 ) -> NoReturn:
     del signum, frame
+    for interrupt_signal in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(interrupt_signal, signal.SIG_IGN)
     raise ReleaseInterrupted("Render release interrupted.")
 
 
