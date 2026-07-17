@@ -932,6 +932,58 @@ def test_main_restores_full_handler_snapshot_if_install_is_interrupted(
     assert captured.err == "Render release failed (ReleaseInterrupted).\n"
 
 
+@pytest.mark.parametrize(
+    ("first_signal", "pending_signal"),
+    [
+        (signal.SIGINT, signal.SIGTERM),
+        (signal.SIGTERM, signal.SIGINT),
+    ],
+)
+def test_main_blocks_other_signal_while_installing_both_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+    first_signal: signal.Signals,
+    pending_signal: signal.Signals,
+) -> None:
+    previous_handler_calls, previous_handler = benign_signal_handlers
+    real_signal = signal.signal
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, ())
+    release_calls: list[str] = []
+
+    def install_interrupting_signal(
+        signum: int,
+        handler: Callable[[int, FrameType | None], object] | int | None,
+    ) -> object:
+        previous_handler = real_signal(signum, handler)
+        if signum == first_signal and handler is render_release._raise_release_interrupted:
+            signal.raise_signal(pending_signal)
+        return previous_handler
+
+    monkeypatch.setattr(
+        render_release,
+        "RELEASE_SIGNALS",
+        (first_signal, pending_signal),
+    )
+    monkeypatch.setattr(render_release.signal, "signal", install_interrupting_signal)
+    monkeypatch.setattr(
+        render_release,
+        "release",
+        lambda: release_calls.append("release"),
+    )
+
+    assert render_release.main() == 1
+
+    assert release_calls == []
+    assert previous_handler_calls == []
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+    assert signal.pthread_sigmask(signal.SIG_BLOCK, ()) == previous_mask
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Render release failed (ReleaseInterrupted).\n"
+
+
 @pytest.mark.parametrize("interrupt_signal", [signal.SIGINT, signal.SIGTERM])
 def test_first_signal_at_recovery_entry_still_restores_both_services(
     monkeypatch: pytest.MonkeyPatch,
@@ -1034,6 +1086,47 @@ def test_signal_between_handler_restores_does_not_interrupt_main(
     assert API_KEY not in captured.err
 
 
+def test_main_restores_entry_mask_once_after_normal_handler_restoration(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    benign_signal_handlers: tuple[list[signal.Signals], object],
+) -> None:
+    previous_handler_calls, previous_handler = benign_signal_handlers
+    real_pthread_sigmask = signal.pthread_sigmask
+    previous_mask = real_pthread_sigmask(signal.SIG_BLOCK, ())
+    mask_operations: list[int] = []
+
+    def tracking_pthread_sigmask(
+        how: int,
+        mask: Iterable[int],
+    ) -> set[int | signal.Signals]:
+        mask_operations.append(how)
+        return real_pthread_sigmask(how, mask)
+
+    monkeypatch.setattr(
+        render_release.signal,
+        "pthread_sigmask",
+        tracking_pthread_sigmask,
+    )
+    monkeypatch.setattr(render_release, "release", lambda: None)
+
+    assert render_release.main() == 0
+
+    assert mask_operations == [
+        signal.SIG_BLOCK,
+        signal.SIG_SETMASK,
+        signal.SIG_BLOCK,
+        signal.SIG_SETMASK,
+    ]
+    assert previous_handler_calls == []
+    assert signal.getsignal(signal.SIGINT) is previous_handler
+    assert signal.getsignal(signal.SIGTERM) is previous_handler
+    assert real_pthread_sigmask(signal.SIG_BLOCK, ()) == previous_mask
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
 @pytest.mark.parametrize(
     ("release_error", "expected_error_name"),
     [
@@ -1052,15 +1145,21 @@ def test_signal_before_restore_mask_is_retried_without_duplicate_summary(
     real_pthread_sigmask = signal.pthread_sigmask
     previous_mask = real_pthread_sigmask(signal.SIG_BLOCK, ())
     interrupted = False
+    block_calls = 0
+    setmask_calls = 0
 
     def interrupting_pthread_sigmask(
         how: int,
         mask: Iterable[int],
     ) -> set[int | signal.Signals]:
-        nonlocal interrupted
-        if how == signal.SIG_BLOCK and not interrupted:
-            interrupted = True
-            signal.raise_signal(signal.SIGTERM)
+        nonlocal block_calls, interrupted, setmask_calls
+        if how == signal.SIG_BLOCK:
+            block_calls += 1
+            if block_calls == 2:
+                interrupted = True
+                signal.raise_signal(signal.SIGTERM)
+        elif how == signal.SIG_SETMASK:
+            setmask_calls += 1
         return real_pthread_sigmask(how, mask)
 
     def fake_release() -> None:
@@ -1077,6 +1176,7 @@ def test_signal_before_restore_mask_is_retried_without_duplicate_summary(
     assert render_release.main() == 1
 
     assert interrupted is True
+    assert setmask_calls == 2
     assert previous_handler_calls == []
     assert signal.getsignal(signal.SIGINT) is previous_handler
     assert signal.getsignal(signal.SIGTERM) is previous_handler

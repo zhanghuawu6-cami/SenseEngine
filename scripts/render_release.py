@@ -520,6 +520,7 @@ def _restore_release_signal_handlers(
 
 def main() -> int:
     """Run the release while keeping arbitrary upstream details off stderr."""
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, RELEASE_SIGNALS)
     previous_handlers: dict[signal.Signals, SignalHandler] = {
         signum: signal.getsignal(signum) for signum in RELEASE_SIGNALS
     }
@@ -527,11 +528,18 @@ def main() -> int:
     failure_reported = False
     try:
         try:
-            for signum in RELEASE_SIGNALS:
-                signal.signal(
-                    signum,
-                    _raise_release_interrupted,
-                )
+            handlers_installed = False
+            try:
+                for signum in RELEASE_SIGNALS:
+                    signal.signal(
+                        signum,
+                        _raise_release_interrupted,
+                    )
+                handlers_installed = True
+            finally:
+                if not handlers_installed:
+                    _restore_release_signal_handlers(previous_handlers)
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
             release()
         except Exception as error:
             failure_reported = True
