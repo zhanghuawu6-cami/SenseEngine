@@ -37,7 +37,7 @@ services:
       - key: MEDIA_ROOT
         value: /tmp/senseorder-demo-media
       - key: SENSE_ENGINE_PRIVATE_URL
-        value: http://senseengine-api-demo-cami:8000
+        value: https://senseengine-api-demo-cami.onrender.com
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_SITE_URL

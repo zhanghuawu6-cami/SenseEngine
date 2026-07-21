@@ -4,7 +4,7 @@
 
 **Goal:** Add a payment-free Render Blueprint that publishes the existing SenseOrder Web demo over HTTPS without weakening or changing the production deployment definition.
 
-**Architecture:** Keep `render.yaml` as the production-only private-API and persistent-disk topology. Add `render.demo.yaml` with two Render free Web Services in Singapore: a publicly addressable FastAPI service and the Next.js site, joined through Render's private service hostname and protected by a generated shared service key. Store demo SQLite and media data under `/tmp` so the free deployment is explicitly ephemeral.
+**Architecture:** Keep `render.yaml` as the production-only private-API and persistent-disk topology. Add `render.demo.yaml` with two Render free Web Services in Singapore: a publicly addressable FastAPI service and the Next.js site. Because Free Web Services cannot receive private-network traffic, the Web server calls the API's public HTTPS URL with a generated shared service key. Store demo SQLite and media data under `/tmp` so the free deployment is explicitly ephemeral.
 
 **Tech Stack:** Render Blueprint YAML, Docker, FastAPI, Next.js, PyYAML, pytest
 
@@ -34,7 +34,7 @@ assert web_env["DATABASE_PATH"]["value"].startswith("/tmp/")
 assert web_env["MEDIA_ROOT"]["value"].startswith("/tmp/")
 assert web_env["SENSE_ENGINE_PRIVATE_URL"] == {
     "key": "SENSE_ENGINE_PRIVATE_URL",
-    "value": "http://senseengine-api-demo-cami:8000",
+    "value": "https://senseengine-api-demo-cami.onrender.com",
 }
 ```
 
@@ -58,7 +58,7 @@ Expected: FAIL because `render.demo.yaml` does not exist.
 
 - [ ] **Step 1: Add the minimal Blueprint**
 
-Create two Docker Web Services using `plan: free`, `region: singapore`, and `autoDeployTrigger: "off"`. Use the existing Dockerfiles. Do not declare a disk or private service. Generate `SENSE_ENGINE_SERVICE_KEY`, `ADMIN_PASSWORD`, and `SESSION_SECRET`; use a non-secret demo administrator identifier. Point the Web server at `http://senseengine-api-demo-cami:8000` and store demo runtime files under `/tmp`.
+Create two Docker Web Services using `plan: free`, `region: singapore`, and `autoDeployTrigger: "off"`. Use the existing Dockerfiles. Do not declare a disk or private service. Generate `SENSE_ENGINE_SERVICE_KEY`, `ADMIN_PASSWORD`, and `SESSION_SECRET`; use a non-secret demo administrator identifier. Point the Web server at `https://senseengine-api-demo-cami.onrender.com` and store demo runtime files under `/tmp`.
 
 - [ ] **Step 2: Document the demo boundary and launch path**
 

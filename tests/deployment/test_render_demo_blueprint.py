@@ -94,7 +94,7 @@ def test_demo_api_uses_the_existing_container_and_readiness_endpoint() -> None:
     }
 
 
-def test_demo_web_uses_ephemeral_storage_and_the_private_engine_hostname() -> None:
+def test_demo_web_uses_ephemeral_storage_and_the_authenticated_api_url() -> None:
     web = _services(_blueprint())[WEB_SERVICE_NAME]
 
     assert web["runtime"] == "docker"
@@ -113,7 +113,7 @@ def test_demo_web_uses_ephemeral_storage_and_the_private_engine_hostname() -> No
     }
     assert env_vars["SENSE_ENGINE_PRIVATE_URL"] == {
         "key": "SENSE_ENGINE_PRIVATE_URL",
-        "value": f"http://{API_SERVICE_NAME}:8000",
+        "value": f"https://{API_SERVICE_NAME}.onrender.com",
     }
     assert env_vars["NODE_ENV"] == {"key": "NODE_ENV", "value": "production"}
     assert env_vars["NEXT_PUBLIC_SITE_URL"] == {

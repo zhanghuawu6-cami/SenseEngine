@@ -143,6 +143,11 @@ Web 将 SQLite 放在 `/var/data/senseorder.db`，媒体放在 `/var/data/media`
 重新部署后可能清空，因此该配置只用于体验演示，不能保存正式内容。生产环境仍只由 `render.yaml`
 定义，免费演示不得替代生产发布、备份或恢复流程。
 
+Render Free Web Service 不能接收私网流量，因此免费 Web 演示通过服务器端的
+`SENSE_ENGINE_PRIVATE_URL` 调用 API 的公开 HTTPS 地址。变量名保留是为了复用现有 Web 契约；
+它没有 `NEXT_PUBLIC_` 前缀，不会进入浏览器包。API 仍要求两项服务共享的生成式
+`SENSE_ENGINE_SERVICE_KEY`，未授权的公网请求不能执行演示推断。
+
 ### 快照与恢复演练
 
 Render 对持久磁盘每 24 小时自动创建一次快照。操作员仍须在 Render Dashboard 确认最新
