@@ -1,0 +1,50 @@
+envVarGroups:
+  - name: senseorder-demo-shared-secrets
+    envVars:
+      - key: SENSE_ENGINE_SERVICE_KEY
+        generateValue: true
+
+services:
+  - type: web
+    name: senseengine-api-demo-cami
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /health/ready
+    autoDeployTrigger: "off"
+    envVars:
+      - fromGroup: senseorder-demo-shared-secrets
+      - key: SENSE_ENGINE_ENV
+        value: production
+      - key: UVICORN_LOG_LEVEL
+        value: info
+
+  - type: web
+    name: senseorder-web-demo-cami
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./web/Dockerfile
+    dockerContext: ./web
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    envVars:
+      - fromGroup: senseorder-demo-shared-secrets
+      - key: DATABASE_PATH
+        value: /tmp/senseorder-demo.db
+      - key: MEDIA_ROOT
+        value: /tmp/senseorder-demo-media
+      - key: SENSE_ENGINE_PRIVATE_URL
+        value: http://senseengine-api-demo-cami:8000
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_SITE_URL
+        value: https://senseorder-web-demo-cami.onrender.com
+      - key: ADMIN_EMAIL
+        value: demo-admin@senseorder.local
+      - key: ADMIN_PASSWORD
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true

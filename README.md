@@ -133,6 +133,16 @@ Web 将 SQLite 放在 `/var/data/senseorder.db`，媒体放在 `/var/data/media`
 同一一致性边界：必须一起备份、恢复和验收。在数据库迁移到 PostgreSQL 且媒体迁移到
 对象存储之前，禁止扩容 Web 实例，否则 SQLite 写入和本地媒体会出现分叉。
 
+### Render 免费公开演示
+
+`render.demo.yaml` 是与生产拓扑隔离的公开演示配置，只声明两个 Render Free Web Service，
+不声明私有服务、付费实例或持久磁盘。创建 Blueprint Instance 时选择本仓库，设置
+`Branch=main`、`Blueprint Path=render.demo.yaml`，并在最终提交前确认两个服务均显示为 Free。
+
+免费实例在闲置后可能休眠，首次打开需要等待冷启动。SQLite 与上传媒体位于 `/tmp`，服务重启或
+重新部署后可能清空，因此该配置只用于体验演示，不能保存正式内容。生产环境仍只由 `render.yaml`
+定义，免费演示不得替代生产发布、备份或恢复流程。
+
 ### 快照与恢复演练
 
 Render 对持久磁盘每 24 小时自动创建一次快照。操作员仍须在 Render Dashboard 确认最新
